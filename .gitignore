@@ -1,0 +1,40 @@
+# Python
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info/
+
+# Environments / secrets
+.venv/
+.env
+
+# uv
+# (keep uv.lock tracked once we lock; ignore nothing here for now)
+
+# Data + model artifacts (large, regenerable)
+data/raw/
+data/interim/
+data/processed/
+data/splits/
+outputs/
+models/
+.model-cache/
+hf-cache/
+
+# Experiment tracking
+wandb/
+
+# Caches
+.pytest_cache/
+.ruff_cache/
+unsloth_compiled_cache/
+.ipynb_checkpoints/
+
+# Nix
+result
+result-*
+
+# OS
+.DS_Store

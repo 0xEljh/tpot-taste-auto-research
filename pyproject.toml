@@ -1,0 +1,65 @@
+[project]
+name = "tpot-taste"
+version = "0.1.0"
+description = "Small-model post-training (SFT + RL) for tpot / tech-Twitter virality: score posts, ideate, and improve drafts."
+requires-python = ">=3.12,<3.13"
+dependencies = [
+  # --- data + eval core (intentionally torch-free so Phase-1 installs fast) ---
+  "numpy==2.2.6",
+  "pandas>=2.2.0",
+  "polars>=1.12.0",
+  "pyarrow>=18.0.0",
+  "datasets==4.3.0",
+  "huggingface-hub>=0.30.0",
+  "scikit-learn>=1.5.0",
+  "scipy>=1.13.0",
+  "datasketch>=1.6.0",   # MinHash/LSH near-duplicate detection
+  "ftfy>=6.2.0",         # mojibake / unicode repair on archived tweets
+  "regex>=2024.5.15",
+  "orjson>=3.10.0",
+  "wandb>=0.19.0",
+  "python-dotenv>=1.0.1",
+  "pydantic>=2.7.0",
+  "loguru>=0.7.2",
+  "rich>=13.7.0",
+  "tqdm>=4.66.0",
+  "typer>=0.12.0",
+  "matplotlib>=3.9.0",
+  "seaborn>=0.13.0",
+]
+
+[project.optional-dependencies]
+# Heavy modeling stack. Versions pinned to the set proven working on THIS
+# machine (negative-space-learning-v2/uv.lock) so uv reuses cached wheels and
+# resolves first-try-clean. Do not bump piecemeal — torch pins triton/xformers.
+train = [
+  "torch==2.10.0",
+  "transformers==5.5.0",
+  "accelerate==1.13.0",
+  "peft==0.18.1",
+  "trl==0.24.0",
+  "bitsandbytes==0.49.2",
+  "unsloth==2026.4.8",
+]
+
+# Sentence embeddings for topic-similarity pair mining (optional; resolved
+# separately so it can't perturb the pinned train set).
+embed = [
+  "sentence-transformers>=3.3.0",
+]
+
+# vLLM-backed online generation for GRPO (Phase 4). Added only when needed.
+rl = [
+  "vllm",
+]
+
+dev = [
+  "pytest>=8.3.0",
+]
+
+[build-system]
+requires = ["setuptools>=69", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+packages = ["tpot_taste"]
