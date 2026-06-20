@@ -7,7 +7,7 @@ Companion to `01-system-design.md` (the full design).
 
 ## STATUS (living)
 
-**Phase:** 0 — environment & scaffolding.
+**Phase:** 3 — Taste Writer SFT. **Scorer LOCKED at v6** (`outputs/scorer/qwen3b-bt-v6-combined`).
 **Last updated:** 2026-06-20.
 
 - [x] Recon: env, GPU, data, stack (4 parallel research agents).
@@ -34,13 +34,11 @@ Companion to `01-system-design.md` (the full design).
 - [x] Phase 2e: Scorer v5 (length-MATCHED degradations) — **length bias FIXED** (real-data corr +0.23→-0.04) but
       **lost bait/corporate penalization** (corporate-cringe + engagement-bait became the TOP probes). The
       qualitative-over-quantitative lesson: the length *number* got perfect, the actual taste judgment got worse [D16].
-- [x] **Scorer INCUMBENT = v4** (`outputs/scorer/qwen3b-bt-v4-taste`) — best on the axis that matters (bait/
-      corporate/low-effort all lowest); mild length lean is downstream-mitigable (RL length penalty + judge-time norm).
-- [~] Phase 2f: Scorer v6 — final challenger: train on **BOTH** degradation distributions (v4 ∪ v5 pairs, ~20k) so
-      the model learns bait=bad robustly without a length shortcut. Beat v4 or v4 stands & LOCKS. HARD STOP. ← in progress
-- [ ] Phase 3: Taste Writer SFT (Qwen2.5-3B-Instruct, Unsloth 4-bit) on curated good tpot tweets (deferred).
-- [ ] Phase 2: Taste Scorer (encoder BT + regression) + ranking eval.
-- [ ] Phase 3: Taste Writer SFT (Qwen2.5-3B, Unsloth 4-bit).
+- [x] Phase 2f: Scorer v6 (combined v4∪v5 pairs, 1 ep) — clears the gate (length corr **+0.132** < 0.15) AND
+      recovers punch (funny-punchy top) while keeping the key bait/corporate low; best all-round [D17].
+- [x] **SCORER LOCKED = v6** → `outputs/scorer/qwen3b-bt-v6-combined` (alias `qwen3b-bt-taste-LOCKED`). No v7.
+- [~] Phase 3: Taste Writer SFT (Qwen2.5-3B-Instruct, Unsloth 4-bit) — design `03-writer-design.md` (3 approaches);
+      TDD tests → SFT-data builder (reuse deopt pairs as free improve-supervision) → train. ← in progress
 - [ ] Phase 4: DPO, then GRPO vs. Scorer reward + guardrails.
 - [ ] Phase 5: integration CLI + final benchmark report + reward-hacking audit.
 
@@ -114,6 +112,30 @@ accelerate==1.13.0, bitsandbytes==0.49.2, datasets==4.3.0, numpy==2.2.6`.
 **Why.** Exactly the versions in `negative-space-learning-v2/uv.lock`, already in the uv cache → fast,
 first-try-clean resolve. vLLM and sentence-transformers kept in separate extras so they can't perturb the
 proven set. Per the compat research: pick torch first, let it pin triton/xformers; never bump piecemeal.
+
+## 2026-06-20 — D17: Scorer LOCKED = v6 (combined v4∪v5 pairs) — best compromise; scorer phase done
+
+**v6 (1 epoch on 19,942 v4∪v5 pairs) clears the D16 gate and is the best all-round scorer → LOCKED here, no v7.**
+
+Probes (v6): funny-punchy **+2.67 (top)**, curious-question +1.60, specific-insight +1.45 | engagement-bait
+**-0.92 (lowest)**, aphorism -0.73, earnest -0.62, platitude -0.61, corporate-cringe -0.49 | "lol same" +0.93 and
+rage-bait +0.62 only mildly positive (the one soft spot). **Length corr +0.132** (gate <0.15 ✅; v4 was +0.229).
+
+Why v6 over v4 (the incumbent): (1) **length-neutral enough** (+0.13 vs +0.23) — matters most for its downstream
+role as the **RL reward** (less verbose-hacking pressure); (2) **recovers punch** — funny-punchy back on top, and
+on held-out it correctly scores SHORT high-engagement injokes high ("slate star codesk" 145♥ → +3.73), which v4
+under-rated; (3) **cleaner held-out top** — substantive tpot / AI takes, none of the non-English/unicode OOD
+garbage v4 leaked to its very top; (4) nails the key bait case (engagement-bait lowest) + corporate/platitude
+negative. v4 is more *decisive* (wider probe spread; "lol same"/rage-bait strongly negative) but its length lean +
+punch under-rating + OOD-top-leak cost more than v6's milder "lol same"/rage-bait handling. As both a judge
+(deliverable #2) and an RL reward, v6's *shape* is better.
+
+Residual limits (documented, mitigated downstream): (a) "lol same"/rage-bait only mildly negative — a product
+threshold (~+1.2) still ranks them below substantive content; (b) aphorism still under-rated — no version fixed
+short-aphorism vs platitude (that fine-craft axis is near the D13 noise ceiling); (c) taste ⟂ engagement (real
+pairs ~0.53), as expected — we model taste, not raw virality; (d) synthetic acc 0.72 (< v4/v5 — v6 doesn't overfit
+either degradation shortcut; the least-important metric). All scorer adapters (v1,v3,v4,v5,v6) kept under
+`outputs/scorer/` for reproducibility. **LOCKED = `qwen3b-bt-v6-combined`.** On to Phase 3 (Writer).
 
 ## 2026-06-20 — D16: Scorer v5 verdict — length fixed, bait penalization LOST → v4 is incumbent; v6 = combined data
 
