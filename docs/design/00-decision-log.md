@@ -40,7 +40,8 @@ Companion to `01-system-design.md` (the full design).
 - [~] Phase 3: Taste Writer SFT (Qwen2.5-3B-Instruct) — design `03-writer-design.md`. **DONE:** TDD tests (7 pass,
       `tests/test_writer_data.py`) + SFT-data builder (`tpot_taste/writer/sft_data.py`, `scripts/build_writer_sft.py`)
       → built **19,970 records** (9,970 ideate + 10,000 improve) `data/splits/writer_sft_train.jsonl`.
-      **NEXT:** `scripts/train_writer.py` (TRL SFT, 4-bit QLoRA, completion-only) → train → eval [D18]. ← in progress
+      `scripts/train_writer.py` (TRL SFT, 4-bit QLoRA, full-text v1; smoke-validated) → **SFT v1 TRAINING**
+      (2 ep, W&B `writer-sft-v1`) → eval (scorer-rated win-rate + judge + qualitative) next [D18]. ← in progress
 - [ ] Phase 4: DPO, then GRPO vs. Scorer reward + guardrails.
 - [ ] Phase 5: integration CLI + final benchmark report + reward-hacking audit.
 
@@ -118,9 +119,12 @@ proven set. Per the compat research: pick torch first, let it pin triton/xformer
 ## 2026-06-20 — D18: Writer SFT trainer = TRL SFTTrainer + 4-bit QLoRA (not Unsloth, for v1)
 
 **Decision.** Train the Writer with **TRL `SFTTrainer` + peft LoRA + bitsandbytes 4-bit** — the proven scorer
-stack on this box — rather than Unsloth. Completion-only loss via `DataCollatorForCompletionOnlyLM` (response
-template `<|im_start|>assistant\n`); render each record through the Qwen chat template. Base Qwen2.5-3B-Instruct,
-LoRA on attn+MLP (r=16–32), 1–2 epochs, seq≤512, bf16, paged-adamw-8bit, W&B `tpot-taste`.
+stack on this box — rather than Unsloth. v1 trains **full-text** (render each record through the Qwen chat
+template). Completion-only is **deferred**: TRL 0.24 has no importable `DataCollatorForCompletionOnlyLM`, and
+`assistant_only_loss=True` needs `{% generation %}` tags Qwen's template lacks — and prompts are short, so
+full-text is fine for v1 (revisit with a custom template if the model wastes capacity). Base Qwen2.5-3B-Instruct,
+LoRA on attn+MLP (r=16, α=32), 2 epochs, seq≤512, bf16, paged-adamw-8bit, W&B `tpot-taste`. **Smoke-validated**
+(load + chat-format + 5 steps, loss 6.5→4.0, no OOM at batch 8) before the full run.
 
 **Why (vs Unsloth, D4's original pick).** Unsloth's win is speed/memory, which matters for **GRPO** (Phase 4,
 12 GB-tight), not for 3B SFT (fits comfortably). The TRL+peft+bnb path minimises API risk and matches the scorer
