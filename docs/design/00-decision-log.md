@@ -37,8 +37,10 @@ Companion to `01-system-design.md` (the full design).
 - [x] Phase 2f: Scorer v6 (combined v4∪v5 pairs, 1 ep) — clears the gate (length corr **+0.132** < 0.15) AND
       recovers punch (funny-punchy top) while keeping the key bait/corporate low; best all-round [D17].
 - [x] **SCORER LOCKED = v6** → `outputs/scorer/qwen3b-bt-v6-combined` (alias `qwen3b-bt-taste-LOCKED`). No v7.
-- [~] Phase 3: Taste Writer SFT (Qwen2.5-3B-Instruct, Unsloth 4-bit) — design `03-writer-design.md` (3 approaches);
-      TDD tests → SFT-data builder (reuse deopt pairs as free improve-supervision) → train. ← in progress
+- [~] Phase 3: Taste Writer SFT (Qwen2.5-3B-Instruct) — design `03-writer-design.md`. **DONE:** TDD tests (7 pass,
+      `tests/test_writer_data.py`) + SFT-data builder (`tpot_taste/writer/sft_data.py`, `scripts/build_writer_sft.py`)
+      → built **19,970 records** (9,970 ideate + 10,000 improve) `data/splits/writer_sft_train.jsonl`.
+      **NEXT:** `scripts/train_writer.py` (TRL SFT, 4-bit QLoRA, completion-only) → train → eval [D18]. ← in progress
 - [ ] Phase 4: DPO, then GRPO vs. Scorer reward + guardrails.
 - [ ] Phase 5: integration CLI + final benchmark report + reward-hacking audit.
 
@@ -112,6 +114,19 @@ accelerate==1.13.0, bitsandbytes==0.49.2, datasets==4.3.0, numpy==2.2.6`.
 **Why.** Exactly the versions in `negative-space-learning-v2/uv.lock`, already in the uv cache → fast,
 first-try-clean resolve. vLLM and sentence-transformers kept in separate extras so they can't perturb the
 proven set. Per the compat research: pick torch first, let it pin triton/xformers; never bump piecemeal.
+
+## 2026-06-20 — D18: Writer SFT trainer = TRL SFTTrainer + 4-bit QLoRA (not Unsloth, for v1)
+
+**Decision.** Train the Writer with **TRL `SFTTrainer` + peft LoRA + bitsandbytes 4-bit** — the proven scorer
+stack on this box — rather than Unsloth. Completion-only loss via `DataCollatorForCompletionOnlyLM` (response
+template `<|im_start|>assistant\n`); render each record through the Qwen chat template. Base Qwen2.5-3B-Instruct,
+LoRA on attn+MLP (r=16–32), 1–2 epochs, seq≤512, bf16, paged-adamw-8bit, W&B `tpot-taste`.
+
+**Why (vs Unsloth, D4's original pick).** Unsloth's win is speed/memory, which matters for **GRPO** (Phase 4,
+12 GB-tight), not for 3B SFT (fits comfortably). The TRL+peft+bnb path minimises API risk and matches the scorer
+pipeline; **reserve Unsloth for Phase 4** where the headroom is actually needed. Trade-off: slightly slower SFT —
+negligible at this scale. **Smoke-test first:** the completion-only collator's response-template token-matching for
+Qwen is a known fiddly spot — verify masking on 1–2 steps before the full run (don't burn an hour on a bad mask).
 
 ## 2026-06-20 — D17: Scorer LOCKED = v6 (combined v4∪v5 pairs) — best compromise; scorer phase done
 
