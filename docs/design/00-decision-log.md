@@ -7,7 +7,7 @@ Companion to `01-system-design.md` (the full design).
 
 ## STATUS (living)
 
-**Phase:** 3 — Taste Writer SFT. **Scorer LOCKED at v6** (`outputs/scorer/qwen3b-bt-v6-combined`).
+**Phase:** 4 — preference (DPO/GRPO). **Scorer LOCKED at v6**; **Writer SFT v1 done** (win-rate 0.67 vs base).
 **Last updated:** 2026-06-20.
 
 - [x] Recon: env, GPU, data, stack (4 parallel research agents).
@@ -40,8 +40,10 @@ Companion to `01-system-design.md` (the full design).
 - [~] Phase 3: Taste Writer SFT (Qwen2.5-3B-Instruct) — design `03-writer-design.md`. **DONE:** TDD tests (7 pass,
       `tests/test_writer_data.py`) + SFT-data builder (`tpot_taste/writer/sft_data.py`, `scripts/build_writer_sft.py`)
       → built **19,970 records** (9,970 ideate + 10,000 improve) `data/splits/writer_sft_train.jsonl`.
-      `scripts/train_writer.py` (TRL SFT, 4-bit QLoRA, full-text v1; smoke-validated) → **SFT v1 TRAINING**
-      (2 ep, W&B `writer-sft-v1`) → eval (scorer-rated win-rate + judge + qualitative) next [D18]. ← in progress
+      `scripts/train_writer.py` (TRL SFT, 4-bit QLoRA, full-text). **SFT v1 trained** (loss 6.5→1.1) **+ evaluated:
+      win-rate 0.67 vs base** (improve 0.85), decisive tpot-voice transfer (base = assistant-slop scored -5..-6 by
+      v6) [D18/D19]. Adapter `outputs/writer/qwen3b-sft-v1`; `scripts/eval_writer.py`.
+- [~] Phase 4: preference — best-of-N → DPO (then GRPO) vs the v6 reward + length/bait/KL guardrails (D5). ← next
 - [ ] Phase 4: DPO, then GRPO vs. Scorer reward + guardrails.
 - [ ] Phase 5: integration CLI + final benchmark report + reward-hacking audit.
 
@@ -115,6 +117,28 @@ accelerate==1.13.0, bitsandbytes==0.49.2, datasets==4.3.0, numpy==2.2.6`.
 **Why.** Exactly the versions in `negative-space-learning-v2/uv.lock`, already in the uv cache → fast,
 first-try-clean resolve. vLLM and sentence-transformers kept in separate extras so they can't perturb the
 proven set. Per the compat research: pick torch first, let it pin triton/xformers; never bump piecemeal.
+
+## 2026-06-20 — D19: Writer SFT v1 works — tpot voice transfer confirmed (win-rate 0.67 vs base)
+
+**Writer SFT v1 (Qwen2.5-3B + LoRA, full-text SFT on 19,970 ideate+improve records, 2 ep, loss 6.5→1.1) vs the
+base model, judged by the locked v6 scorer (n=60):** overall win-rate **0.67** (writer +0.33 vs base -0.64);
+ideate 0.57; **improve 0.85**.
+
+**Qualitative (the real signal) — a decisive register shift.** Base outputs are textbook assistant-slop the scorer
+scores -5..-6: "Absolutely! Here's a thought-provoking post for TPOT: ---", "Hey @tpot, have you ever pondered...",
+"Hey there, tech geeks! 🚀", markdown/emojis/preambles. The SFT Writer dropped all of it and writes tpot-native
+(lowercase, terse, earnest/wry, no preamble): "it's not even worth it anymore to be angry at anyone"; "the biggest
+mistake in American politics is to believe that the economy is not a social good"; "if you meet someone who is
+stupid then 99.9% chance they're stupid and not because of you". Voice transfer (deliverable #1 ideate, #3 improve)
+clearly worked.
+
+**Bonus — validates the v6 scorer in action:** it strongly penalizes assistant preamble/bait/cringe and rewards
+tpot voice, exactly as intended. Known soft spots: (a) the scorer can still be fooled by substantive content that
+carries an assistant preamble (a few base "wins" were "Absolutely! Here's... <substantive body>"); (b) some Writer
+outputs are a bit generic/sappy or dry factoids. Neither undermines the result.
+
+**Next (Phase 4):** best-of-N → DPO (then GRPO) using v6 as the reward + length/bait/KL guardrails (D5), to push
+past SFT; then Phase 5 integration CLI (score/ideate/improve) + final benchmark. SFT v1 is a solid base policy.
 
 ## 2026-06-20 — D18: Writer SFT trainer = TRL SFTTrainer + 4-bit QLoRA (not Unsloth, for v1)
 
