@@ -21,23 +21,23 @@ app = typer.Typer(add_completion=False, pretty_exceptions_enable=False)
 
 SYS = ("You rewrite social-media posts exactly as instructed. Output ONLY the rewritten "
        "post text — no preamble, no quotes, no notes, no explanation.")
-# Length-BALANCED degradation styles (v4, D14): ~half make the post SHORTER/terser,
-# ~half LONGER/wordier, so length stops predicting quality and bait/low-effort become
-# explicit negatives.
+# Length-MATCHED degradation styles (v5, D15): every bad-mode (bait, low-effort, vague,
+# bland, corporate, platitude, cringe...) is kept at ~the SAME length as the good post, so
+# length carries no signal (v3 was length-neutral, +0.03) while bait/low-effort stay explicit
+# negatives (the gap v3 had). v4's mistake was making bait degradations SHORT, which coupled
+# "short" with "bad" and gave a +0.23 length bias. We verify chosen≈rejected length post-build.
+_LEN = " Keep it roughly the same length as the original — do NOT make it noticeably longer or shorter."
 STYLES = [
-    # shorter / terser-bad
-    "Rewrite this post as a low-effort, lazy one-liner that drops the substance and specificity.",
-    "Rewrite this post as engagement-bait: a 'RT if you agree' / 'like if you...' / poll-style post that fishes for interaction.",
-    "Rewrite this post as a vague, contentless subtweet that hints at something but says nothing.",
-    "Rewrite this post as a generic hot-take that strips out the nuance and the specifics.",
-    # length-preserving-bad
-    "Rewrite this post to be bland, generic and forgettable: strip the specific detail and the punch, keep only the rough topic.",
-    "Rewrite this post to be dry and humourless, stripping out any wit, voice or personality.",
-    # longer / wordier-bad
-    "Rewrite this post as a wordy, over-explained LinkedIn-style post with corporate phrasing and a tidy takeaway.",
-    "Rewrite this post so it rambles and buries the point, and make it about twice as long.",
-    "Rewrite this post as a generic motivational platitude on the same theme.",
-    "Rewrite this post to be try-hard and cringe, with forced enthusiasm, emojis and hashtags.",
+    "Rewrite this post as low-effort and lazy: drop the substance, specificity and insight." + _LEN,
+    "Rewrite this post as engagement-bait that fishes for replies/RTs ('does anyone else...', 'agree?', 'RT if...')." + _LEN,
+    "Rewrite this post as vague and contentless — it hints at something but says nothing concrete." + _LEN,
+    "Rewrite this post as a generic hot-take with the nuance and the specifics stripped out." + _LEN,
+    "Rewrite this post to be bland, generic and forgettable: strip the specific detail and the punch." + _LEN,
+    "Rewrite this post to be dry and humourless, stripping out any wit, voice or personality." + _LEN,
+    "Rewrite this post in corporate / LinkedIn phrasing with a tidy little takeaway." + _LEN,
+    "Rewrite this post as a generic motivational platitude on the same theme." + _LEN,
+    "Rewrite this post to be try-hard and cringe, with forced enthusiasm." + _LEN,
+    "Rewrite this post so it buries the point and loses the crisp phrasing." + _LEN,
 ]
 _PREFIXES = ("sure,", "here'", "here is", "rewritten", "okay", "ok,", "certainly")
 _NONLATIN = re.compile(r"[぀-ヿ㐀-鿿가-힯؀-ۿ฀-๿]")

@@ -28,8 +28,16 @@ Companion to `01-system-design.md` (the full design).
 - [x] Phase 2c: Scorer v3 (taste) — qualitative **WIN** (corporate-cringe now lowest, purple-prose penalized,
       funny/aphorism high) but a **length/bait confound** (rewards "lol same"/"RT if"); synthetic 0.86,
       real-engagement ~0.50 (taste ⟂ engagement here) [D14]. Adapter `outputs/scorer/qwen3b-bt-v3-taste`.
-- [~] Phase 2d: Scorer v4 — **length-balanced degradations** (add terse/bait/low-effort styles) to kill the
-      length confound. ← in progress
+- [x] Phase 2d: Scorer v4 (length-balanced degradations) — **bait/low-effort fix WORKED** ("lol same" +6.7→-6.0,
+      "RT if" +4.3→-4.0; corporate-cringe stays lowest) but **over-corrected into a mild length bias**
+      (pearson(score,chars) +0.03→+0.23; under-rates short aphorisms) [D15]. Adapter `outputs/scorer/qwen3b-bt-v4-taste`.
+- [x] Phase 2e: Scorer v5 (length-MATCHED degradations) — **length bias FIXED** (real-data corr +0.23→-0.04) but
+      **lost bait/corporate penalization** (corporate-cringe + engagement-bait became the TOP probes). The
+      qualitative-over-quantitative lesson: the length *number* got perfect, the actual taste judgment got worse [D16].
+- [x] **Scorer INCUMBENT = v4** (`outputs/scorer/qwen3b-bt-v4-taste`) — best on the axis that matters (bait/
+      corporate/low-effort all lowest); mild length lean is downstream-mitigable (RL length penalty + judge-time norm).
+- [~] Phase 2f: Scorer v6 — final challenger: train on **BOTH** degradation distributions (v4 ∪ v5 pairs, ~20k) so
+      the model learns bait=bad robustly without a length shortcut. Beat v4 or v4 stands & LOCKS. HARD STOP. ← in progress
 - [ ] Phase 3: Taste Writer SFT (Qwen2.5-3B-Instruct, Unsloth 4-bit) on curated good tpot tweets (deferred).
 - [ ] Phase 2: Taste Scorer (encoder BT + regression) + ranking eval.
 - [ ] Phase 3: Taste Writer SFT (Qwen2.5-3B, Unsloth 4-bit).
@@ -106,6 +114,62 @@ accelerate==1.13.0, bitsandbytes==0.49.2, datasets==4.3.0, numpy==2.2.6`.
 **Why.** Exactly the versions in `negative-space-learning-v2/uv.lock`, already in the uv cache → fast,
 first-try-clean resolve. vLLM and sentence-transformers kept in separate extras so they can't perturb the
 proven set. Per the compat research: pick torch first, let it pin triton/xformers; never bump piecemeal.
+
+## 2026-06-20 — D16: Scorer v5 verdict — length fixed, bait penalization LOST → v4 is incumbent; v6 = combined data
+
+**The qualitative-over-quantitative lesson, concretely.** v5's length-matched degradations did exactly what the
+gate predicted: training-pair corr(is_chosen, length) +0.03 (v5) vs -0.26 (v4), and the trained scorer's
+real-data length corr collapsed **+0.229 (v4) → -0.036 (v5)**. The *number* is now perfect.
+
+But the *taste judgment got worse*. v5 probes (compressed, near-random): **corporate-cringe +2.59 (HIGHEST)**,
+**engagement-bait +2.03 (2nd)**, earnest-vulnerable -0.95 (lowest). For an "is this worth posting?" tool, ranking
+corporate-cringe and "RT if you agree" as the TOP picks is disqualifying. (Held-out top/bottom was fine — funny/
+insight high, AI-poetry low — but the probe failure on the core bait/corporate axis is decisive.) Real transfer
+~chance (0.517/0.510), like v3; synthetic 0.898.
+
+**Why:** forcing bait to the SAME length as the good post made the bad-signal too subtle; at ~1/10 of pairs per
+style the model didn't learn bait=bad. v4's bait was SHORT — a strong (if length-confounded) signal it latched
+onto. Real tension: short-bait (v4) learns bait=bad via a length shortcut; same-length-bait (v5) is length-neutral
+but doesn't learn bait=bad. Whack-a-mole across v3 (bait-high) → v4 (length-biased) → v5 (bait-high).
+
+**Decisions.** (1) **v4 is the incumbent best scorer.** It most reliably flags the actionable "don't post this"
+cases (bait/corporate/cringe/low-effort all lowest), its top held-out is substantive tpot, and its one flaw (mild
+length lean under-rating short aphorisms) is downstream-mitigable (the RL reward already has an explicit length
+penalty ε; judge-time length-normalize). Choosing v4 over v5 *despite v5's better length number* is the
+qualitative call the user asked for. (2) One final **principled** challenger **v6 = train on v4 ∪ v5 pairs**
+(~20k): the model sees bait-as-bad at BOTH short and matched length → should learn bait=bad robustly (from v4
+pairs) without leaning on length (v5 pairs counterbalance). A different *mechanism* (multi-distribution), not
+another style tweak. 1 epoch on 20k = same gradient steps as the 2-epoch 10k runs, each pair seen once (less
+overfit). **Gate:** v6 must keep bait/corporate LOW (v4's win) AND |length corr| < ~0.15. If it doesn't beat v4,
+**v4 stands and the scorer is LOCKED — no v7.** Then Phase 3 (Writer SFT).
+
+## 2026-06-20 — D15: Scorer v4 verdict — bait fix worked, mild length bias → v5 (length-matched)
+
+**v4 (length-balanced deopt, 9,966 pairs, 2 ep) vs v3 — measured + eyeballed.**
+
+PRIMARY GOAL ACHIEVED — the v3 bait/low-effort confound is gone:
+- "lol same" (low-effort): v3 **+6.66** (2nd-highest probe) → v4 **-6.00** (near lowest).
+- "RT if you agree" (bait): v3 **+4.28** → v4 **-3.98**. rage-bait +4.88 → -2.03.
+- corporate-cringe stays lowest (-6.31); generic-platitude low (-1.83).
+- v4 top held-out = substantive tech/intellectual tpot (econ/AI/earnest); bottom = fragments, bare @mentions,
+  "Find your audience". A coherent "is this worth posting?" signal — exactly deliverable #2.
+
+NEW FLAW — a mild **length bias**: pearson(score, chars) = **+0.229** (v4) vs **+0.031** (v3, ≈0). Good SHORT
+content got under-rated: funny-punchy +8.88→+1.30; aphorism +6.03→**-1.85** (now ≈ tied with generic-platitude).
+Cause: v4 made the bait/low-effort degradations SHORT, coupling "short" with "bad" → the model leaned "longer =
+better". Two non-English/unicode tweets also leaked to the very top (OOD failure; held-out set isn't language-filtered).
+
+Real-engagement transfer (taste ⟂ engagement, per D13) actually improved slightly: test_pairs 0.515→**0.569**,
+topic 0.496→**0.557** (still weak, as expected — we model taste, not engagement). Synthetic held-out: v4 **0.833**
+on its own pairs; notably v3 scores **0.890** on v4's pairs (v3's craft signal is fine — its only gap was bait).
+
+DIAGNOSIS → v5. v3 was already length-neutral (+0.03); its ONLY flaw was never seeing bait as a negative. v4
+added bait-as-negative but coupled it to SHORTNESS. **v5 = bait/low-effort/vague as negatives BUT every
+degradation kept length-MATCHED to the good** → length carries no signal (like v3) AND bait is penalized (like
+v4). This also closes a reward-hacking vector before the scorer becomes the RL reward (length bias → verbose-post
+hacking, a risk flagged up-front; defense-in-depth alongside the planned RL length penalty). **Gate:** adopt v5
+only if it (a) collapses the length corr toward 0, (b) keeps bait/low-effort low, and ideally (c) separates
+aphorism > platitude. If v5 regresses, lock the best of {v3, v4, v5} and STOP — no v6.
 
 ## 2026-06-20 — D14: Scorer v3 (taste) — qualitative WIN with a length/bait confound → v4
 
