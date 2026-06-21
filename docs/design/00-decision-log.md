@@ -7,8 +7,8 @@ Companion to `01-system-design.md` (the full design).
 
 ## STATUS (living)
 
-**Phase:** 4b — GRPO training (Phase 5 shipped: CLI + benchmark). **Scorer LOCKED v6** · **Writer DPO v2** ·
-**CLI usable**. **Last updated:** 2026-06-21.
+**Phase:** COMPLETE — all phases done. **Scorer LOCKED v6** · **Writer LOCKED DPO v2** (final) · **CLI usable** ·
+GRPO explored → hit the v6 ceiling (D27). **Last updated:** 2026-06-21.
 
 - [x] Recon: env, GPU, data, stack (4 parallel research agents).
 - [x] Scaffold: `flake.nix`, `pyproject.toml` (pinned), dirs, `.env` (W&B), docs.
@@ -46,9 +46,9 @@ Companion to `01-system-design.md` (the full design).
 - [x] Phase 4a: DPO DONE — v1 length-hacked (caught by the audit, D21); **v2 = length-penalized best-of-N**
       beats SFT **0.75** (v6) with the hack GONE (112 vs 123 chars) [D22]. **Writer LOCKED = DPO v2**
       (`outputs/writer/qwen3b-dpo-v2`, alias `qwen3b-writer-LOCKED`). Progression base→SFT(0.67)→DPO v2(0.75).
-- [~] Phase 4b: GRPO v1 = **TIE with DPO v2** (0.52, weak push) [D25]. **Unsloth loads fine on our stack but
-      memory wasn't the constraint** (plain TRL fits num_gen=8) → deferred [D26]. **GRPO v2 training** (num_gen 8,
-      lr 2e-6, rep_penalty 3.0, 300 steps) → eval vs DPO v2 (ceiling vs under-trained?). Writer stays DPO v2. ← in progress
+- [x] Phase 4b DONE: GRPO v1 tie (weak push, D25) → v2 (num_gen 8, stronger) **beats v6 0.65 BUT human read =
+      platitude-drift** = the **v6 ceiling** (D27); guardrails held (no length/bait/repetition hack). Unsloth probed
+      (works, but memory wasn't binding → deferred, D26). **Writer stays LOCKED = DPO v2**; GRPO v1/v2 kept as experiments.
 - [x] Phase 5 DONE: `TasteEngine` (`tpot_taste/engine.py`) + `scripts/tpot.py` CLI (score/ideate/improve/repl,
       best-of-N: Writer generates → Scorer ranks), 8 TDD tests; `docs/benchmark.md` scorecard [D23]. End-to-end usable.
 - [ ] Phase 4: DPO, then GRPO vs. Scorer reward + guardrails.
@@ -124,6 +124,28 @@ accelerate==1.13.0, bitsandbytes==0.49.2, datasets==4.3.0, numpy==2.2.6`.
 **Why.** Exactly the versions in `negative-space-learning-v2/uv.lock`, already in the uv cache → fast,
 first-try-clean resolve. vLLM and sentence-transformers kept in separate extras so they can't perturb the
 proven set. Per the compat research: pick torch first, let it pin triton/xformers; never bump piecemeal.
+
+## 2026-06-21 — D27: GRPO v2 beats v6 (0.65) but DRIFTS to platitudes — the v6 ceiling, qualitatively
+
+**GRPO v2 (num_gen 8, lr 2e-6, rep_penalty 3.0, 300 steps) vs DPO v2, judged by raw v6 (n=60):** win-rate
+**0.65** (v2 +1.78 vs +1.11); ideate 0.65, improve 0.65. Length 118 vs 126 (no hack); repetition controlled. So
+the stronger push DID move the v6 score — v1 was under-trained, not at a hard ceiling.
+
+**BUT the human read flips it.** GRPO v2's top "wins" are generic motivational advice / platitudes v6 over-rewards:
+"If you're going to do something, go all in..." (+4.09), "you must read at least one book a week" (+3.98), "the
+best way to avoid getting burned is not to get burned" (+1.67). v6 scores *elaborated* advice high — its D17
+aphorism≈platitude blind spot (bare clichés score LOW on the probes, but dressed-up ones fool it). So pushing GRPO
+hard on v6 drifts the Writer toward v6-pleasing genericness — which a human rates WORSE tpot. The +0.65 is largely
+metric-gaming the blind spot, not a true-quality gain.
+
+**The practical v6 ceiling — the project's thesis at the RL frontier:** once the policy is good (DPO v2), the only
+way left to raise the v6 NUMBER is to exploit what v6 gets wrong. The length/bait/repetition guardrails held (they
+stopped the easy hacks), but they can't cover the platitude blind spot, which is intrinsic to the scorer. **The
+lever now is a BETTER SCORER** (human-labeled taste pairs / a calibrated LLM-judge ensemble), not more RL.
+
+**Decision: Writer stays LOCKED = DPO v2.** GRPO v1/v2 kept as documented experiments (`qwen3b-grpo-v1/v2`)
+demonstrating the ceiling. Final progression: base → SFT (0.67 vs base) → **DPO v2 (0.75 vs SFT) = shipped**;
+GRPO +0.65 on v6 but a qualitative platitude-drift, so not adopted. **Phase 4b DONE — project complete.**
 
 ## 2026-06-21 — D26: Unsloth verdict (loads, but memory wasn't the constraint) + GRPO v2 (stronger push)
 

@@ -29,11 +29,17 @@ QLoRA adapters on one 12 GB RTX 3080 Ti.
 
 `scripts/eval_writer.py` (A/B, judged by the locked v6 scorer, n=60, with a length-drift audit).
 
-| Comparison | win-rate | mean score | length (chars) |
+| Comparison | win-rate (v6) | mean score | length (chars) |
 |---|---|---|---|
 | SFT v1 vs **base** | **0.67** | +0.33 vs −0.64 | — |
 | DPO v1 vs SFT | 0.67 | +1.27 vs +0.74 | **175 vs 121 — length-hack** |
-| **DPO v2 vs SFT** | **0.75** | +1.51 vs +0.48 | **112 vs 123 — clean** |
+| **DPO v2 vs SFT** ← shipped | **0.75** | +1.51 vs +0.48 | **112 vs 123 — clean** |
+| GRPO v1 vs DPO v2 | 0.52 (tie) | +1.44 vs +1.31 | 113 vs 118 |
+| GRPO v2 vs DPO v2 | 0.65* | +1.78 vs +1.11 | 118 vs 126 |
+
+\* GRPO v2's v6-win is a **platitude-drift** — pushing RL hard on v6 exploits its aphorism≈platitude blind spot
+(elaborated motivational advice scores high). A human read prefers DPO v2, so **GRPO is not adopted**; it marks the
+practical **v6 ceiling**. The length/bait/repetition guardrails held throughout (no easy hacks).
 
 - **SFT** (full-text on 19,970 ideate+improve records; deopt pairs reused as free bad→good supervision) produced a
   decisive register shift: base outputs are assistant-slop ("Absolutely! Here's a post for TPOT: ---", emojis,
@@ -69,7 +75,8 @@ Smoke example — `improve "lit a fake cig"` (draft −0.17) → ranked improvem
 
 ## Next
 
-- **Phase 4b — GRPO** (on-policy push from DPO v2 vs the v6 reward + §3 guardrails). Caveat: pushes harder on the
-  reward, so more prone to exploiting v6's blind spots; judge on a held-out *human* read, not v6 alone.
-- A stronger Scorer (calibrated LLM-judge ensemble, or human-labeled taste pairs) would lift the ceiling on
-  everything downstream.
+GRPO (Phase 4b) is **done** — it confirmed the v6 ceiling (D27): a stronger push raised the v6 number (0.65) but
+by drifting to platitudes v6 can't distinguish from insight, so DPO v2 ships. The single highest-leverage next
+step is therefore **a better Scorer** — human-labeled taste pairs and/or a calibrated LLM-judge ensemble — which
+would lift the ceiling on the scorer (deliverable #2), the DPO/GRPO reward, *and* best-of-N at inference. Only then
+is more RL worthwhile. (Unsloth + vLLM would also make a 7B Writer or many-step GRPO feasible, if desired — D26.)
