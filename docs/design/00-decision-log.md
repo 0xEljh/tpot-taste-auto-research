@@ -134,6 +134,35 @@ accelerate==1.13.0, bitsandbytes==0.49.2, datasets==4.3.0, numpy==2.2.6`.
 first-try-clean resolve. vLLM and sentence-transformers kept in separate extras so they can't perturb the
 proven set. Per the compat research: pick torch first, let it pin triton/xformers; never bump piecemeal.
 
+## 2026-06-21 — D33: Scorer v7.1 (judge-anchored deopt) WORKS — the platitude blind spot is fixed
+
+**v7.1 (`qwen3b-bt-v71-judge-deopt`, 5,317 pairs = 4,320 judge-anchored degradations + 997 judge-taste, 1 ep,
+lr 1e-4, r 16).** The fix from D32 landed — and it's the Phase-6 payoff:
+
+| panel category | v6 | v7.1 |
+|---|---|---|
+| tpot_canon | +1.68 | **+3.08** (top) |
+| aphorism | +1.59 | +2.22 |
+| **generic_viral (platitude)** | **+2.66 (v6's #1)** | **+1.27 (now below tpot)** |
+| promo | +0.91 | **−2.51** |
+| bait | +0.46 | −0.76 |
+
+- **The platitude blind spot — the whole reason for Phase 6 — is FIXED**: generic_viral fell from v6's top
+  category to below both highs; promo/bait went sharply negative. HIGH-vs-LOW separation gap **+0.65 → +2.59 (~4×)**.
+- **Held-out taste acc = 0.616** on *unrelated* real judge-labeled pairs (`taste_v7_test_pairs`) — vs v7 0.54 and
+  v7b 0.49 (both chance). It **GENERALIZES**: the register confound is broken; it learned actual taste, not surface.
+- **Confirms D32's diagnosis + fix:** the judge as a clean ANCHOR (D31) + v6's same-content, register-matched
+  degradation contrast = a learnable taste signal on a de-polluted anchor. Both ingredients were necessary.
+
+**Residual (honest):** `corporate` (+2.39) still edges aphorism (+2.22), so the panel is *technically* BLURRED by
+0.17 — a narrow "tidy-takeaway / listicle-thread" weak spot, far smaller than the platitude problem. v7.2 lever:
+up-weight corporate degradations / add harder corporate negatives.
+
+**Decision: v7.1 is the new best scorer** (beats v6 on every pollution axis AND generalizes). Repointing the
+LOCKED alias is held pending the full dipstick (`demo_eval --scorer v71`, running) + user review. v7/v7b kept as
+documented failures. **Next: Phase 6d — propagate the fix into the Writer** (still SFT'd on engagement-polluted
+goods, D28): re-curate goods via the judge → re-SFT → re-DPO vs v7.1. The rot is two layers deep (D32 note).
+
 ## 2026-06-21 — D32: Scorer v7 (judge-distilled) FAILS — distilling unrelated pairs learns register, not taste
 
 **v7 (`qwen3b-bt-v7-judge`, 997 judge-taste pairs, 2 ep, lr 1e-4).** Train acc **0.966** — but it's a mirage:
