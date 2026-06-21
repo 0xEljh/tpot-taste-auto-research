@@ -134,6 +134,66 @@ accelerate==1.13.0, bitsandbytes==0.49.2, datasets==4.3.0, numpy==2.2.6`.
 first-try-clean resolve. vLLM and sentence-transformers kept in separate extras so they can't perturb the
 proven set. Per the compat research: pick torch first, let it pin triton/xformers; never bump piecemeal.
 
+## 2026-06-21 — D31: Judge VALIDATED on real data — it corrects v6 both ways → it becomes the labeler (v7)
+
+**`scripts/judge_vs_v6.py`, 236 real goods, judge vs v6.** Spearman = **+0.202** (they rank very differently —
+expected if the judge fixes v6's systematic error). The eyeball is decisive — the judge is right in BOTH
+directions on real, messy tweets, not just my archetypes:
+- **v6-HIGH / judge-LOW (pollution the judge drops):** crypto shilling ("Jito will be the most valuable
+  protocol…"), YC promo ("deadline for applying to the summer batch…"), news headlines ("BREAKING: Federal
+  Reserve cuts rates…", avocado imports), political bait, and a **literal hex-hash string v6 scored +1.17**.
+  All judge 0–2. These are exactly the engagement-selected non-tpot virality v6 over-rewards.
+- **v6-LOW / judge-HIGH (tpot the judge rescues):** "DeepSeek is insane… an excuse to play Factorio with data
+  centers" (−0.88→8), "i was procrastinating doing my taxes so we built cursor for excel" (−1.88→7), "two years
+  ago I made a shrine to an anime man and then converted it into an altar" (+0.02→10), "enjoying Proofs and
+  Refutations and how the characters elegantly diss each other" (−1.54→8). All genuine tpot v6 buried.
+
+**Verdict: the judge is the taste signal we lacked.** It replaces engagement as the label source. The risk
+(3B judge inherits the platitude prior) did not bind, on archetypes OR real data.
+
+**Architecture = distillation (the generative judge is too slow to be the reward directly: ~1.5 s/item → hours
+for the corpus).** Judge (BATCHED ~10 min / 3k items, D31) labels a pool → train the FAST scalar **BT scorer
+v7** on judge-labeled taste pairs → v7 scales over the corpus + serves the RL reward at scalar-head speed. The
+judge also doubles as a high-quality inference-time best-of-N ranker (8 cands × 1.5 s = OK interactively).
+Added `judge_score_batch` (left-pad batched generation) to make labeling feasible.
+
+**Next:** `scripts/build_taste_pairs.py` — sample a diverse pool (high-z goods to de-pollute + broad uploader
+sample to recover buried tpot) → judge-score → form length-balanced taste pairs (chosen=judge-high,
+rejected=judge-low, margin gate, per-author cap) → train scorer **v7** → re-run the dipstick + audit (before/after).
+
+## 2026-06-21 — D30: The judge PASSES the panel — a rubric-driven base judge inverts v6's failure
+
+**Result (`scripts/judge_eval.py`, base Qwen + the D29 rubric, no training).** On the SAME dipstick panel v6
+fails, the judge cleanly separates taste from generic-virality:
+
+| category | judge (0–10) | v6 (was) |
+|---|---|---|
+| tpot_canon | **7.80** | +1.68 |
+| aphorism | **6.60** | +1.59 |
+| generic_viral | **2.80** | **+2.66 (v6's top)** |
+| promo / corporate / assistant_slop | **0.00** | +0.9…+2.2 |
+| bait | 1.33 | +0.46 |
+
+worst-HIGH 6.60 ≫ best-LOW 2.80 → **CLEAN** (v6 was BLURRED). Pairwise crux (tpot/aphorism vs platitude,
+order-robust): **31/32 = 0.97**. **The feared failure mode didn't bind** — I worried a 3B judge would share the
+mainstream platitude-loving prior; the rubric steers it out of that. So a *generative, prompted* judge has
+better tpot-taste than our *trained* BT scorer. Big: it means the lever (a better taste signal) is reachable
+without new human labels — the base model already knows, if asked correctly.
+
+**Caveats (don't over-trust the number).** The panel is MY hand-authored archetypes, and the rubric names the
+bad categories explicitly — shared vocabulary inflates the score. Two yellow flags: **18/50 crux pairs were
+position-unstable** (36% — the judge flips when order swaps; `agree_winner` conservatively discards them) and
+1 pointwise parse-miss. **Archetype-pass ≠ real-data-pass.** The decisive test is whether the judge corrects
+v6's *known real errors* (the −5.09 "Earth as a fusion reactor" false-negative; the promo/platitude
+false-positives from the audit).
+
+**Next (running): `scripts/judge_vs_v6.py`** scores ~240 real goods with both; the disagreements ARE the
+curation decisions (v6-high/judge-low = drop; v6-low/judge-high = rescue). If the judge's corrections eyeball
+as right → it becomes the labeler: mine clean taste pairs (no engagement) → train scorer **v7** → re-run the
+dipstick (before/after). If real-data is shakier than archetypes → strengthen rubric → few-shot → escalate to a
+larger judge (API) for offline labels distilled into the 3B BT scorer. Also TODO: writer-as-judge variant
+(D29-C, `--judge-adapter`), since the user suggested "the same model for writing in the scoring."
+
 ## 2026-06-21 — D28: Phase 6 reopened (user) — audit the goods for platitude pollution; the diagnosis refines
 
 **User steer (Phase 6).** The first full loop is a good first pass; now go further. Four threads: (1) **data

@@ -110,3 +110,31 @@ def judge_pairwise_2x(model, tok, a: str, b: str, **kw) -> str | None:
 
 def judge_score(model, tok, text: str, **kw) -> float | None:
     return parse_score(_generate(model, tok, build_score_prompt(text), **kw))
+
+
+def judge_score_batch(model, tok, texts: list[str], *, batch_size: int = 16,
+                      max_new_tokens: int = 80) -> list[float | None]:
+    """Pointwise taste scores for many texts via LEFT-padded batched greedy generation (D31).
+
+    ~batch_size× faster than looping judge_score — makes corpus-scale judge-labeling feasible (minutes,
+    not hours). Restores the tokenizer's padding side afterwards.
+    """
+    import torch
+
+    old_side = tok.padding_side
+    tok.padding_side = "left"
+    out: list[float | None] = []
+    try:
+        for i in range(0, len(texts), batch_size):
+            bt = texts[i : i + batch_size]
+            prompts = [tok.apply_chat_template(build_score_prompt(t), tokenize=False,
+                                               add_generation_prompt=True) for t in bt]
+            enc = tok(prompts, return_tensors="pt", padding=True, truncation=True, max_length=768).to(model.device)
+            with torch.no_grad():
+                g = model.generate(**enc, max_new_tokens=max_new_tokens, do_sample=False,
+                                   pad_token_id=tok.pad_token_id)
+            for j in range(len(bt)):
+                out.append(parse_score(tok.decode(g[j][enc["input_ids"].shape[1]:], skip_special_tokens=True)))
+    finally:
+        tok.padding_side = old_side
+    return out
