@@ -10,9 +10,19 @@ from tpot_taste.scoring.judge import (
     agree_winner,
     build_pairwise_prompt,
     build_score_prompt,
+    build_score_prompt_fewshot,
     parse_score,
     parse_verdict,
 )
+
+
+def test_fewshot_prompt_embeds_exemplars_then_query():
+    msgs = build_score_prompt_fewshot("the QUERY post", [("a witty one", 9), ("a corporate one", 1)])
+    assert msgs[0]["role"] == "system" and "tpot" in msgs[0]["content"].lower()
+    joined = " ".join(m["content"] for m in msgs)
+    assert "a witty one" in joined and "SCORE: 9" in joined
+    assert "a corporate one" in joined and "SCORE: 1" in joined
+    assert msgs[-1]["role"] == "user" and "the QUERY post" in msgs[-1]["content"]  # query is last
 
 
 def test_pairwise_prompt_contains_both_and_rubric():

@@ -50,6 +50,20 @@ def build_pairwise_prompt(a: str, b: str) -> list[dict]:
     return [{"role": "system", "content": RUBRIC}, {"role": "user", "content": user}]
 
 
+def build_score_prompt_fewshot(text: str, exemplars: list[tuple[str, float]]) -> list[dict]:
+    """Score prompt with the human's labeled examples in-context (D37 — the lever rules couldn't pull).
+
+    exemplars: [(example_text, score 0-10), ...] — typically human tpot=9 / not=1. The judge sees the
+    human's taste demonstrated, then scores `text`. Robustly steers the prior where rubric edits don't.
+    """
+    msgs: list[dict] = [{"role": "system", "content": RUBRIC}]
+    for ex_text, ex_score in exemplars:
+        msgs.append(build_score_prompt(ex_text)[1])  # the user turn
+        msgs.append({"role": "assistant", "content": f"SCORE: {ex_score:g}"})
+    msgs.append(build_score_prompt(text)[1])
+    return msgs
+
+
 def build_score_prompt(text: str) -> list[dict]:
     user = (
         "Rate this post's tpot taste from 0 (generic / bait / corporate / platitude) to "
