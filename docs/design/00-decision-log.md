@@ -46,8 +46,9 @@ Companion to `01-system-design.md` (the full design).
 - [x] Phase 4a: DPO DONE — v1 length-hacked (caught by the audit, D21); **v2 = length-penalized best-of-N**
       beats SFT **0.75** (v6) with the hack GONE (112 vs 123 chars) [D22]. **Writer LOCKED = DPO v2**
       (`outputs/writer/qwen3b-dpo-v2`, alias `qwen3b-writer-LOCKED`). Progression base→SFT(0.67)→DPO v2(0.75).
-- [~] Phase 4b: GRPO — infra built (`grpo_reward.py` + 7 tests, `train_grpo.py`; reward = v6 − length − bait;
-      QLoRA-gen dtype fix [D24]). Smoke fits 12 GB (no vLLM); **200-step run training**. Then eval vs DPO v2. ← in progress
+- [~] Phase 4b: GRPO v1 = **TIE with DPO v2** (0.52, weak push; guardrails held; repetition-degeneration note)
+      [D25]. → GRPO v2 on **Unsloth** (faster + bigger num_gen + repetition penalty) to push harder / test the
+      v6 ceiling. Writer stays LOCKED = DPO v2 until something clearly beats it. ← in progress
 - [x] Phase 5 DONE: `TasteEngine` (`tpot_taste/engine.py`) + `scripts/tpot.py` CLI (score/ideate/improve/repl,
       best-of-N: Writer generates → Scorer ranks), 8 TDD tests; `docs/benchmark.md` scorecard [D23]. End-to-end usable.
 - [ ] Phase 4: DPO, then GRPO vs. Scorer reward + guardrails.
@@ -123,6 +124,26 @@ accelerate==1.13.0, bitsandbytes==0.49.2, datasets==4.3.0, numpy==2.2.6`.
 **Why.** Exactly the versions in `negative-space-learning-v2/uv.lock`, already in the uv cache → fast,
 first-try-clean resolve. vLLM and sentence-transformers kept in separate extras so they can't perturb the
 proven set. Per the compat research: pick torch first, let it pin triton/xformers; never bump piecemeal.
+
+## 2026-06-21 — D25: GRPO v1 ≈ DPO v2 (weak push) — Unsloth v2 to push harder / disambiguate
+
+**GRPO v1 (200 steps, num_gen 4, β 0.04, lr 1e-6, reward = v6 − length − bait) vs DPO v2, judged by raw v6
+(n=60):** overall **0.52** (GRPO +1.44 vs DPO v2 +1.31); ideate 0.60, improve 0.35. Length 113 vs 118 (no hack).
+Reward stayed flat (~1.0–1.4), KL bounded (~1.9) all through training → the policy barely moved from its DPO v2
+start. **Net: a tie.**
+
+Reads: (1) the push was **weak** (low lr, 200 slow ~23 s/step steps, small groups) — can't tell ceiling from
+under-trained. (2) Guardrails **held** (no length-hack; GRPO emits less bait/emoji than DPO v2 since its reward
+penalizes bait — but the **raw-v6 eval can't see that**, so it under-credits GRPO). (3) Early **degeneration**:
+v6 rewards repetition (GRPO's "I'm just going to tell you." ×3 → +1.99); pushing harder on v6 risks amplifying
+its blind spots.
+
+**Decision (answers the Unsloth question with data):** to know if GRPO can beat DPO v2, push harder — more steps +
+bigger num_generations (lower-variance advantages), which is exactly Unsloth's win (vLLM-colocate speed + memory
+headroom; plain TRL *fit* but is slow at num_gen 4). So **GRPO v2 on Unsloth**, + a **repetition penalty** in the
+reward (close the v6 blind spot v1 exposed), judged on a **human read** (raw v6 is an unfair judge of a
+guarded-reward policy). If Unsloth's FastLanguageModel fights transformers 5.5, fall back to plain-TRL GRPO with
+num_gen bumped as far as fits. **Writer stays LOCKED = DPO v2** until something clearly beats it.
 
 ## 2026-06-21 — D24: GRPO (Phase 4b) — running; multi-objective reward + a QLoRA-generation dtype fix
 
