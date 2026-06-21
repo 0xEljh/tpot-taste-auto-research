@@ -7,17 +7,20 @@ Companion to `01-system-design.md` (the full design).
 
 ## STATUS (living)
 
-**Phase:** 6 (REOPENED by user, D28) — go beyond the first pass. v6/DPO-v2 are the *incumbents* to beat. Threads:
-(1) de-pollute the goods (curation), (2) demonstrative dipstick → Notion for human sensing, (3) self-play /
-LLM-judge scorer ("same model in scoring"), (4) reframe objectives. **Root:** replace the engagement proxy with a
-taste-vs-generic-virality signal. **Last updated:** 2026-06-21.
+**Phase:** 6 essentially DONE — **the platitude pollution is fixed at the scorer level.** Scorer **LOCKED = v7.1**
+(judge-anchored deopt, D33); Writer stays DPO-v2 (propagation was a wash — the bug was the scorer, not the writer,
+D35). **Root cause settled:** the engagement proxy was *adversarial* to taste; eliciting taste from the base model
+(judge) and distilling it (v7.1) was the fix. **Open for user:** human-calibrate the judge, taste pluralism,
+v7.2 corporate residual, adopt dpo-v2sft? **Last updated:** 2026-06-21.
 
-- [~] Phase 6a: goods audit DONE (`scripts/audit_goods.py`, D28) — pollution is real but subtle (platitudes 1.2%
-      but +0.305 v6 lift; promo-creep is the bigger leak; v6's top is mostly genuine tpot). Naive heuristic filter
-      rejected (low-yield + lossy). Next: demonstrative dipstick → Notion; then LLM-judge labeler (curation + scorer).
-- [ ] Phase 6b: demonstrative dipstick eval set (scorer panel + writer panel) → `notion-cat` for human review.
-- [ ] Phase 6c: LLM-judge / self-play scorer experiment (3A), calibrated on the dipstick; relabel pairs sans engagement.
-- [ ] Phase 6d: re-curate goods with the calibrated judge (1B), retrain scorer, re-run audit + dipstick (before/after).
+- [x] Phase 6a: goods audit (`audit_goods.py`, D28) — pollution real but subtle; naive heuristic filter rejected.
+- [x] Phase 6b: demonstrative dipstick (`demo_eval.py` + `eval/demo_panel.py`) → Notion (D28); proved v6's flaw
+      systematic + bidirectional (generic_viral its TOP category; deadpan tpot lowest).
+- [x] Phase 6c: taste **judge** (`scoring/judge.py`) — validated on archetypes + real data (D30/D31). Distill: v7
+      (unrelated pairs) FAILED → register confound (D32); **v7.1 (judge-anchored deopt) WORKS** (D33) — generic_viral
+      below tpot, held-out 0.54→0.62, OOD fixed. **Scorer LOCKED v6→v7.1.**
+- [x] Phase 6d: propagate to Writer (curate goods via v7.1 → re-SFT → re-DPO, D34) — **judge A/B = TIE (0.43)**;
+      the platitude problem was a scorer problem, not a writer one (D35). Writer stays DPO-v2.
 
 - [x] Recon: env, GPU, data, stack (4 parallel research agents).
 - [x] Scaffold: `flake.nix`, `pyproject.toml` (pinned), dirs, `.env` (W&B), docs.
@@ -133,6 +136,29 @@ accelerate==1.13.0, bitsandbytes==0.49.2, datasets==4.3.0, numpy==2.2.6`.
 **Why.** Exactly the versions in `negative-space-learning-v2/uv.lock`, already in the uv cache → fast,
 first-try-clean resolve. vLLM and sentence-transformers kept in separate extras so they can't perturb the
 proven set. Per the compat research: pick torch first, let it pin triton/xformers; never bump piecemeal.
+
+## 2026-06-21 — D35: Writer propagation is a WASH — the platitude problem was a SCORER problem, not a Writer one
+
+**Result.** Re-SFT on v7.1-curated goods (`qwen3b-sft-v2`) + re-DPO vs v7.1 (`qwen3b-dpo-v2sft`). The FAIR eval —
+the independent taste **judge** arbitrating new vs old writer (`scripts/eval_writer_judge.py`, 18 prompts incl.
+the platitude traps; NOT the v7.1 scorer, which would give the new writer home advantage): **3 wins / 4 losses /
+11 ties → 0.43 of 7 decided = a TIE** (within noise of 0.5). Qualitatively the new writer is good on the
+"discipline" trap (introspective, no platitude) but leaks weak candidates on "work hard" ("you must work very hard
+to succeed"); the old writer is comparable. The re-DPO itself was weak (rewards/acc 0.547 — sft-v2's candidates
+are close-quality, so small margins).
+
+**The insight (worth more than the artifact).** The platitude pathology was an **evaluation/scorer** failure, not
+a **generation** one. The DPO-v2 writer could already produce tpot; v6 over-rewarded platitudes, which (a)
+mis-ranked best-of-N and (b) drifted GRPO (D27, now retroactively explained). **Fixing the scorer (v7.1) fixed the
+whole system through best-of-N** — dipstick #2 (v7.1 + the *old* writer) already de-platitudes. Re-training the
+writer on clean data was the principled move but added no measurable quality on the fair metric. *Where you put
+the taste signal (the judge/scorer) matters more than retraining the generator.*
+
+**Decisions.** Scorer **LOCKED = v7.1** (the real Phase-6 win, D33). Writer **stays DPO-v2** — a tie gives no
+evidence to churn the incumbent; `qwen3b-sft-v2`/`qwen3b-dpo-v2sft` kept as clean-data equivalents.
+**Open (user's call):** adopt `dpo-v2sft` on *principle* (foundation trained on de-polluted goods, less latent
+risk) vs keep DPO-v2 on *evidence* (measured tie). Phase 6 whole-system test complete: the lever is the taste
+signal, not the generator.
 
 ## 2026-06-21 — D34: Phase 6d — propagate the fix into the Writer (re-curate goods → re-SFT → re-DPO)
 

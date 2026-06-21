@@ -6,11 +6,45 @@ QLoRA adapters on one 12 GB RTX 3080 Ti.
 
 | Capability | Deliverable | Model |
 |---|---|---|
-| Judge if a post is worth posting | #2 | **Scorer** = Qwen2.5-3B + BT reward head (v6) |
+| Judge if a post is worth posting | #2 | **Scorer** = Qwen2.5-3B + BT reward head (**v7.1**) |
 | Recommend post ideas | #1 | **Writer** = Qwen2.5-3B SFT→DPO (v2) |
 | Suggest improvements | #3 | Writer (best-of-N) + Scorer (ranks) |
 
-## Taste Scorer (v6) — `qwen3b-bt-taste-LOCKED`
+## Phase 6 (2026-06-21): the platitude fix — Scorer v6 → v7.1
+
+The first pass shipped Scorer v6, but it had a systematic blind spot: it **over-rewarded generic-viral
+platitudes** (the root of GRPO's drift, D27). Phase 6 traced this to the label source — goods were selected by
+*engagement*, and **taste ⟂ engagement** (D13), so engagement-selection is *adversarial* to taste (it imports
+platitudes/promo/news virality). The fix, validated qualitatively at every step (decision log D28–D35):
+
+1. **Demonstrative dipstick** (`scripts/demo_eval.py`, a fixed archetype panel + writer panel, pushed to Notion)
+   measured the flaw: on clean archetypes v6 ranked **generic_viral its TOP category** (+2.66 > tpot +1.68).
+2. **A taste judge** (`tpot_taste/scoring/judge.py`) — base Qwen + a tpot-taste rubric, scoring taste not
+   engagement — **inverts** that (tpot 7.8 ≫ platitude 2.8) and, on 236 *real* goods, drops v6's pollution
+   (crypto/promo/news/a hex hash) and rescues v6's buried tpot (Factorio/DeepSeek, cursor-for-excel). The base
+   model already *had* taste; it just had to be elicited, not trained (D30/D31).
+3. **Distillation:** judge-label → train a fast BT scorer. v7 (unrelated judge-taste pairs) **FAILED** — learned
+   register not taste (held-out chance, D32). **v7.1 = judge-anchored deopt** (judge picks clean tpot anchors →
+   degrade to generic at matched register) **WORKS** (D33):
+
+| panel category | v6 | **v7.1** | held-out taste acc | v6→v7.1 |
+|---|---|---|---|---|
+| tpot_canon | +1.68 | **+3.08** | (unrelated real judge-pairs) | |
+| aphorism | +1.59 | +2.22 | v6/v7: chance | |
+| **generic_viral** | **+2.66 (top)** | **+1.27** | **v7.1: 0.616** | platitudes now below tpot |
+| promo | +0.91 | **−2.51** | | leak fixed |
+
+HIGH-vs-LOW separation **+0.65 → +2.59 (~4×)**; OOD-non-English over-scoring fixed. Residual: corporate-listicle
+still mildly over-rated (v7.2 lever). **Scorer LOCKED v6 → v7.1** (`qwen3b-bt-v71-judge-deopt`).
+
+4. **Writer propagation (D34/D35)** — re-curated goods via v7.1 → re-SFT → re-DPO vs v7.1. The independent
+   judge-arbitrated A/B (new vs old writer, *not* scored by v7.1) was a **TIE (0.43 of 7 decided)**. The lesson:
+   **the platitude problem was a *scorer* problem, not a *writer* one** — fixing the scorer fixed the system via
+   best-of-N; the writer was already adequate. **Writer stays DPO-v2.**
+
+> The v6-era scorecard below is retained as history; the locked scorer is now v7.1.
+
+## Taste Scorer (v6, historical) — superseded by v7.1
 
 `scripts/eval_scorer.py`, `scripts/inspect_scorer.py`.
 
@@ -75,8 +109,16 @@ Smoke example — `improve "lit a fake cig"` (draft −0.17) → ranked improvem
 
 ## Next
 
-GRPO (Phase 4b) is **done** — it confirmed the v6 ceiling (D27): a stronger push raised the v6 number (0.65) but
-by drifting to platitudes v6 can't distinguish from insight, so DPO v2 ships. The single highest-leverage next
-step is therefore **a better Scorer** — human-labeled taste pairs and/or a calibrated LLM-judge ensemble — which
-would lift the ceiling on the scorer (deliverable #2), the DPO/GRPO reward, *and* best-of-N at inference. Only then
-is more RL worthwhile. (Unsloth + vLLM would also make a 7B Writer or many-step GRPO feasible, if desired — D26.)
+The v6 ceiling (D27) was broken by the better Scorer it called for: **v7.1** (judge-anchored, D33) fixes the
+platitude blind spot. The frontier is now elsewhere:
+
+1. **Human-calibrate the judge** (the one thing we can't bootstrap) — the judge's taste = base-model prior ×
+   *our* rubric, graded on *our* archetypes. A few hundred human labels (on the judge/v6 disagreements) would
+   turn "eyeballed correct" into a *measured* judge accuracy and tune the rubric to the real target.
+2. **v7.2 — the corporate-listicle residual** (the one panel category v7.1 still mildly over-rates): up-weight
+   corporate/listicle degradations.
+3. **Taste pluralism** — is "tpot taste" one axis or several (rationalist / post-rat / e-acc / builder /
+   shitposter)? Possibly a conditional scorer.
+4. **GRPO redux vs v7.1** — re-running the RL push against a scorer that no longer rewards platitudes (the D27
+   drift was v6's fault) may now yield a genuine gain, not metric-gaming.
+5. **Adopt `dpo-v2sft`?** — the clean-data-foundation writer (tie on evidence; cleaner on principle).
