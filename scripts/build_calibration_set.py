@@ -21,6 +21,8 @@ app = typer.Typer(add_completion=False, pretty_exceptions_enable=False)
 def main(
     pool: Path = Path("data/splits/taste_v7_pool_scored.parquet"),
     out: Path = Path("data/splits/calibration_set.parquet"),
+    exclude: Path = typer.Option(None, help="parquet whose `text`s to exclude (e.g. a prior round)"),
+    id_start: int = 1,
     per_bin: int = 22,
     seed: int = 0,
 ) -> None:
@@ -29,6 +31,11 @@ def main(
     import polars as pl
 
     df = pl.read_parquet(pool).filter(pl.col("score").is_not_null())
+    if exclude is not None and exclude.exists():
+        seen = {" ".join(t.split()).lower() for t in pl.read_parquet(exclude)["text"].to_list()}
+        df = df.filter(~pl.col("text").map_elements(lambda t: " ".join(t.split()).lower() in seen,
+                                                    return_dtype=pl.Boolean))
+        print(f"[exclude] dropped prior-round items -> {df.height} pool remains")
     rng = random.Random(seed)
     # stratify by judge score so the human tests the judge across its whole range
     bins = [(-0.1, 2.0), (2.0, 4.0), (4.0, 6.0), (6.0, 8.0), (8.0, 10.1)]
@@ -40,7 +47,7 @@ def main(
             picked.append({"text": r["text"], "judge_score": float(r["score"])})
     rng.shuffle(picked)  # randomize order so the user can't infer the score from position
     for i, r in enumerate(picked):
-        r["id"] = i + 1
+        r["id"] = i + id_start
     pl.DataFrame(picked).select(["id", "text", "judge_score"]).write_parquet(out)
     print(f"[write] {out}: {len(picked)} items across {len(bins)} judge-score bins (~{per_bin}/bin)")
     import numpy as np

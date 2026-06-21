@@ -137,6 +137,25 @@ accelerate==1.13.0, bitsandbytes==0.49.2, datasets==4.3.0, numpy==2.2.6`.
 first-try-clean resolve. vLLM and sentence-transformers kept in separate extras so they can't perturb the
 proven set. Per the compat research: pick torch first, let it pin triton/xformers; never bump piecemeal.
 
+## 2026-06-21 — D38: 7B judge ≈ 3B — size isn't the ceiling; the lever is MORE HUMAN LABELS (few-shot)
+
+**7B test (`judge_fewshot_test.py --base Qwen2.5-7B-Instruct`):** rubric-only Spearman **+0.066** (3B: 0.062),
+few-shot **+0.266** (3B: 0.232). A 7B judge aligns **essentially the same** as 3B. **Size is not the ceiling.**
+
+**Crisp conclusion of the alignment investigation (D36–D38).** The bottleneck is the *signal*, not capacity:
+- rubric edits: no leverage (0.06) — the taste prior is rigid to rules.
+- bigger model: no leverage (0.07 / 0.27) — the prior just isn't finer.
+- **few-shot human exemplars: the only lever** (0.06 → 0.23–0.27 with 12), and it **scales with labels**.
+
+The human's tpot taste (wit/deadpan/anti-earnest) is idiosyncratic and absent from any base-model prior; only the
+human's *examples* carry it. **Path: more human labels → few-shot (or fine-tune) the judge → distill v7.2.** With
+~12 exemplars we hit 0.23–0.27; ~140 labels (round-1 60 + round-2 80) should push the few-shot judge meaningfully
+higher, then a distill is worth it. NOT distilling v7.2 yet (0.23 on provisional labels is marginal + circular).
+
+**Done this round:** round-2 labeling set (`calibration_set_r2.parquet`, 80 fresh items, ids 61–140) prepped +
+pushed to the same Notion DB; `build_score_prompt_fewshot` is a first-class primitive ready for the next distill.
+**Alignment thread is now BLOCKED on user labels** — the honest state; taken as far as it goes without them.
+
 ## 2026-06-21 — D37: Aligning the judge to the human — rubric is NOT the lever, few-shot exemplars ARE (partly)
 
 Follow-up to D36's weak alignment (Spearman 0.126). Two experiments:
