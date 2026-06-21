@@ -7,8 +7,8 @@ Companion to `01-system-design.md` (the full design).
 
 ## STATUS (living)
 
-**Phase:** 4b/5 — GRPO + CLI. **Scorer LOCKED v6**; **Writer LOCKED = DPO v2** (0.75 vs SFT, length-hack fixed).
-**Last updated:** 2026-06-21.
+**Phase:** 5 DONE — CLI + benchmark shipped. **Scorer LOCKED v6** · **Writer LOCKED DPO v2** · **CLI usable**.
+4b GRPO is the optional remaining push. **Last updated:** 2026-06-21.
 
 - [x] Recon: env, GPU, data, stack (4 parallel research agents).
 - [x] Scaffold: `flake.nix`, `pyproject.toml` (pinned), dirs, `.env` (W&B), docs.
@@ -47,7 +47,8 @@ Companion to `01-system-design.md` (the full design).
       beats SFT **0.75** (v6) with the hack GONE (112 vs 123 chars) [D22]. **Writer LOCKED = DPO v2**
       (`outputs/writer/qwen3b-dpo-v2`, alias `qwen3b-writer-LOCKED`). Progression base→SFT(0.67)→DPO v2(0.75).
 - [ ] Phase 4b: GRPO — on-policy push from DPO v2 vs the v6 reward + length/bait/KL guardrails (§3); vLLM, 12GB-tight.
-- [ ] Phase 5: integration CLI (`score`/`ideate`/`improve`) + final benchmark report + reward-hacking audit.
+- [x] Phase 5 DONE: `TasteEngine` (`tpot_taste/engine.py`) + `scripts/tpot.py` CLI (score/ideate/improve/repl,
+      best-of-N: Writer generates → Scorer ranks), 8 TDD tests; `docs/benchmark.md` scorecard [D23]. End-to-end usable.
 - [ ] Phase 4: DPO, then GRPO vs. Scorer reward + guardrails.
 - [ ] Phase 5: integration CLI + final benchmark report + reward-hacking audit.
 
@@ -121,6 +122,20 @@ accelerate==1.13.0, bitsandbytes==0.49.2, datasets==4.3.0, numpy==2.2.6`.
 **Why.** Exactly the versions in `negative-space-learning-v2/uv.lock`, already in the uv cache → fast,
 first-try-clean resolve. vLLM and sentence-transformers kept in separate extras so they can't perturb the
 proven set. Per the compat research: pick torch first, let it pin triton/xformers; never bump piecemeal.
+
+## 2026-06-21 — D23: Phase 5 — integrated CLI + benchmark (system is end-to-end usable)
+
+**TasteEngine** (`tpot_taste/engine.py`) lazily loads the locked Writer (DPO v2, CausalLM) + Scorer (v6,
+SeqClassification) on separate 4-bit bases; ideate/improve do **best-of-N** (generate N → Scorer ranks → top-k),
+so the two models work together — the actual product value. **CLI** `scripts/tpot.py`: score / ideate / improve /
+repl (load-once interactive). 8 TDD tests on the pure helpers (build_prompt, rank_topk). Smoke: improve "lit a
+fake cig" (-0.17) → ranked improvements +1.88 / +1.53 / +1.10. **Benchmark** `docs/benchmark.md` — the single
+scorecard (scorer + writer metrics, the reward-hacking audit, reproduce + use).
+
+**Design (per convention):** chose a unified engine over independent per-command loaders (the best-of-N
+integration *is* the deliverable) and over a server (over-engineered for v1; added a thin `repl` for fast
+interactive use). **Phase 5 DONE.** Remaining: Phase 4b GRPO — optional SOTA push, judge on a held-out human
+read (it pushes harder on v6, so it's more prone to exploiting v6's blind spots).
 
 ## 2026-06-21 — D22: DPO v2 (length-balanced) — clean win, hack fixed → Writer LOCKED = dpo-v2
 
