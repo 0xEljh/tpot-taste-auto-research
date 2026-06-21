@@ -7,8 +7,8 @@ Companion to `01-system-design.md` (the full design).
 
 ## STATUS (living)
 
-**Phase:** 5 DONE — CLI + benchmark shipped. **Scorer LOCKED v6** · **Writer LOCKED DPO v2** · **CLI usable**.
-4b GRPO is the optional remaining push. **Last updated:** 2026-06-21.
+**Phase:** 4b — GRPO training (Phase 5 shipped: CLI + benchmark). **Scorer LOCKED v6** · **Writer DPO v2** ·
+**CLI usable**. **Last updated:** 2026-06-21.
 
 - [x] Recon: env, GPU, data, stack (4 parallel research agents).
 - [x] Scaffold: `flake.nix`, `pyproject.toml` (pinned), dirs, `.env` (W&B), docs.
@@ -46,7 +46,8 @@ Companion to `01-system-design.md` (the full design).
 - [x] Phase 4a: DPO DONE — v1 length-hacked (caught by the audit, D21); **v2 = length-penalized best-of-N**
       beats SFT **0.75** (v6) with the hack GONE (112 vs 123 chars) [D22]. **Writer LOCKED = DPO v2**
       (`outputs/writer/qwen3b-dpo-v2`, alias `qwen3b-writer-LOCKED`). Progression base→SFT(0.67)→DPO v2(0.75).
-- [ ] Phase 4b: GRPO — on-policy push from DPO v2 vs the v6 reward + length/bait/KL guardrails (§3); vLLM, 12GB-tight.
+- [~] Phase 4b: GRPO — infra built (`grpo_reward.py` + 7 tests, `train_grpo.py`; reward = v6 − length − bait;
+      QLoRA-gen dtype fix [D24]). Smoke fits 12 GB (no vLLM); **200-step run training**. Then eval vs DPO v2. ← in progress
 - [x] Phase 5 DONE: `TasteEngine` (`tpot_taste/engine.py`) + `scripts/tpot.py` CLI (score/ideate/improve/repl,
       best-of-N: Writer generates → Scorer ranks), 8 TDD tests; `docs/benchmark.md` scorecard [D23]. End-to-end usable.
 - [ ] Phase 4: DPO, then GRPO vs. Scorer reward + guardrails.
@@ -122,6 +123,20 @@ accelerate==1.13.0, bitsandbytes==0.49.2, datasets==4.3.0, numpy==2.2.6`.
 **Why.** Exactly the versions in `negative-space-learning-v2/uv.lock`, already in the uv cache → fast,
 first-try-clean resolve. vLLM and sentence-transformers kept in separate extras so they can't perturb the
 proven set. Per the compat research: pick torch first, let it pin triton/xformers; never bump piecemeal.
+
+## 2026-06-21 — D24: GRPO (Phase 4b) — running; multi-objective reward + a QLoRA-generation dtype fix
+
+GRPO from DPO v2, on-policy: reward = v6 taste score − length penalty (over 200 chars) − bait penalty
+(`tpot_taste/writer/grpo_reward.py`, 7 tests). No vLLM (12 GB-tight) — transformers generation. Two blockers
+fixed: (1) the TRL import bug → the D20 shim (covers GRPOTrainer too); (2) **QLoRA-generation dtype mismatch** —
+kbit-training prep upcasts the frozen norms + lm_head to fp32, but GRPO *generates* (DPO never did), so bf16
+hidden states hit an fp32 lm_head → `expected Float found BFloat16`. Fix (`scripts/train_grpo.py`): after trainer
+setup, cast the 73 frozen fp32 params back to bf16 (trainable LoRA stays fp32 → training precision unaffected).
+
+Smoke healthy and **fits 12 GB** (policy + reward scorer + generation, no OOM): rewards ~1.0–1.5, KL ~2 (leash
+active), completions ~22–35 chars (length guardrail holding — no inflation). Full run: 200 steps, num_gen 4,
+β 0.04, lr 1e-6, ~23 s/step (~75 min). **Next:** eval GRPO vs DPO v2 — win-rate + length/bait audit + a careful
+HUMAN read (GRPO pushes hardest on v6, so it's the most prone to exploiting v6's blind spots).
 
 ## 2026-06-21 — D23: Phase 5 — integrated CLI + benchmark (system is end-to-end usable)
 
