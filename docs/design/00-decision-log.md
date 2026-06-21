@@ -43,9 +43,9 @@ Companion to `01-system-design.md` (the full design).
       `scripts/train_writer.py` (TRL SFT, 4-bit QLoRA, full-text). **SFT v1 trained** (loss 6.5→1.1) **+ evaluated:
       win-rate 0.67 vs base** (improve 0.85), decisive tpot-voice transfer (base = assistant-slop scored -5..-6 by
       v6) [D18/D19]. Adapter `outputs/writer/qwen3b-sft-v1`; `scripts/eval_writer.py`.
-- [~] Phase 4a: DPO — infra built (compat shim for a TRL 0.24 bug [D20], `dpo_data.py` + 6 tests,
-      `build_dpo_pairs.py`, `train_dpo.py`). Best-of-N pairs building (v6-judged); then DPO from SFT + eval
-      vs SFT (win-rate + length/bait drift audit). Then Phase 4b GRPO, Phase 5 CLI + benchmark. ← in progress
+- [~] Phase 4a: DPO — v1 done: beats SFT **0.67** (v6) BUT **length-hacked** (175 vs 121 chars) + occasional
+      bait drift; the audit caught it [D21]. v2 = length-penalized best-of-N selection (rebuild + retrain +
+      re-eval). Then Phase 4b GRPO, Phase 5 CLI + benchmark. ← in progress
 - [ ] Phase 4: DPO, then GRPO vs. Scorer reward + guardrails.
 - [ ] Phase 5: integration CLI + final benchmark report + reward-hacking audit.
 
@@ -119,6 +119,24 @@ accelerate==1.13.0, bitsandbytes==0.49.2, datasets==4.3.0, numpy==2.2.6`.
 **Why.** Exactly the versions in `negative-space-learning-v2/uv.lock`, already in the uv cache → fast,
 first-try-clean resolve. vLLM and sentence-transformers kept in separate extras so they can't perturb the
 proven set. Per the compat research: pick torch first, let it pin triton/xformers; never bump piecemeal.
+
+## 2026-06-21 — D21: DPO v1 improves the reward but LENGTH-HACKS — best-of-N length penalty → v2
+
+**DPO v1 (best-of-N, 1,418 v6-judged pairs, 2 ep, lr 1e-5, β 0.1) vs SFT, judged by locked v6 (n=60):**
+overall win-rate **0.67** (DPO +1.27 vs SFT +0.74); ideate 0.68, improve 0.65. DPO training was healthy
+(rewards/accuracies 0.76, margins ~1.4) — DPO *did* raise the reward.
+
+**But the length audit caught reward-hacking:** DPO outputs averaged **175 chars vs SFT's 121** (+45%).
+Qualitative confirms partly length-gaming, not pure quality: DPO drifts to engagement-bait ("...What's up with
+that? 🧐 Is it just me? 😂 #TryHardLife", -0.83) where SFT had a crisp aphorism (+2.03), and mangled a greentext
+format (-4.75). Root cause: v6 has a mild +0.13 length lean (D17); best-of-N picks the highest-v6 candidate as
+`chosen`, which skews long → DPO amplifies "longer = better". The 0.67 win-rate is real-quality + length-gaming.
+
+**Fix (v2) — same lesson as the scorer's length saga (D15-D17):** neutralize length in best-of-N selection,
+`adj_score = score - λ·len_chars` (λ=0.005), so `chosen` isn't just the longest. build_dpo_pairs now also dumps
+raw candidates (dpo_candidates.parquet) so λ retunes without regenerating. **Gate:** v2 pairs' chosen-len ≈
+rejected-len AND v2-beats-SFT keeps a quality win WITHOUT the length blow-up. (The RL reward's explicit length
+penalty ε — design §3 — is the complementary guard for GRPO, Phase 4b.)
 
 ## 2026-06-21 — D20: TRL 0.24 × transformers 5.5 import bug — root-fixed in a compat shim
 

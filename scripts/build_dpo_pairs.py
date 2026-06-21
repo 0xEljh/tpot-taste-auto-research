@@ -35,6 +35,7 @@ def main(
     n_improve: int = 600,
     n_cand: int = 4,
     min_margin: float = 1.5,
+    length_penalty: float = 0.0,
     max_new_tokens: int = 64,
     seed: int = 0,
 ) -> None:
@@ -95,11 +96,21 @@ def main(
     sm, stok = load_trained_scorer(str(scorer), base)
     scores = score_texts(sm, stok, texts, batch_size=48)
 
+    # save raw candidates so pairs can be re-formed with a different length_penalty without regenerating
+    raw_out = out.with_name("dpo_candidates.parquet")
+    pl.DataFrame({"gi": [gi for gi, _, _ in flat], "task": [t for _, t, _ in flat],
+                  "user": [u for _, _, u in flat], "text": texts, "score": scores,
+                  "len": [len(t) for t in texts]}).write_parquet(raw_out)
+
+    # length_penalty neutralizes v6's mild length lean (D21) so best-of-N doesn't just pick the longest
     groups: dict[int, dict] = {}
     for (gi, task, user), text, sc in zip(flat, texts, scores):
-        groups.setdefault(gi, {"user": user, "task": task, "candidates": []})["candidates"].append((text, sc))
+        adj = sc - length_penalty * len(text)
+        groups.setdefault(gi, {"user": user, "task": task, "candidates": []})["candidates"].append((text, adj))
 
     records = form_dpo_pairs(groups.values(), sys_prompt=SYS_PROMPT, min_margin=min_margin)
+    ch_len = np.mean([len(r["chosen"][0]["content"]) for r in records]) if records else 0.0
+    rj_len = np.mean([len(r["rejected"][0]["content"]) for r in records]) if records else 0.0
     margins = np.array([r["margin"] for r in records]) if records else np.array([0.0])
     by: dict[str, int] = {}
     for r in records:
@@ -111,6 +122,8 @@ def main(
             f.write(json.dumps({k: r[k] for k in ("prompt", "chosen", "rejected")}, ensure_ascii=False) + "\n")
     print(f"[write] {out} : {len(records):,} pairs (margin>= {min_margin}) {by}  "
           f"margin mean={margins.mean():.2f} p50={np.median(margins):.2f}")
+    print(f"  length balance: chosen {ch_len:.0f} chars  rejected {rj_len:.0f} chars  "
+          f"(want ~equal; chosen>>rejected = length leak) [length_penalty={length_penalty}]")
     for r in records[:3]:
         print(f"  --- {r['task']} (margin {r['margin']:.2f})")
         print(f"    CHOSEN  : {r['chosen'][0]['content'][:90]}")
