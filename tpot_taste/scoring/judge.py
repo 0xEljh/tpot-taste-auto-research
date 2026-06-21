@@ -16,22 +16,28 @@ from __future__ import annotations
 
 import re
 
-# First-draft rubric. CALIBRATED against the dipstick panel (tweak until judge ranks tpot>platitude there).
+# RUBRIC v2 — CALIBRATED to the human's provisional labels (D36). The first draft over-weighted
+# "specific/intellectual/insightful" (false positives on niche trivia, purple prose, self-serious takes)
+# and under-weighted deadpan/ironic/absurdist HUMOR (false negatives on the dry jokes that ARE tpot).
 RUBRIC = (
     "You judge whether a social-media post has *tpot* taste — the voice of the introspective, "
-    "intellectually playful corner of tech Twitter.\n\n"
+    "intellectually playful corner of tech Twitter. Above all, tpot is WIT: dry, ironic, deadpan, a "
+    "little absurd and self-aware. The best posts are funny or quietly true — never earnest, impressive, "
+    "or trying to sound smart.\n\n"
     "MORE tpot (good):\n"
-    "- specific and concrete: a real detail, a particular experience, a named thing\n"
-    "- a surprising or earned turn of thought; shows rather than tells\n"
-    "- first-person observation; wry, earnest, or a little strange\n"
-    "- compressed insight — a sharp aphorism that had to be NOTICED, not looked up\n\n"
-    "LESS tpot (bad) — these often do well on BROADER Twitter but are NOT tpot:\n"
-    "- generic motivational platitudes / self-help advice ('you should...', 'discipline is...')\n"
-    "- engagement-bait ('RT if', 'agree?', 'tag someone'), hashtag/emoji spam\n"
-    "- corporate / LinkedIn voice; promotional announcements ('excited to announce', launches)\n"
-    "- vague, abstract, or assistant-like ('Absolutely! Here's a post...')\n\n"
-    "The hard call: a sharp APHORISM is tpot; a motivational PLATITUDE is not — even when they rhyme. "
-    "Judge the specificity and the earned-ness, not the surface uplift."
+    "- deadpan / ironic / absurdist humor — INCLUDING jokes whose surface looks casual, dumb, or like it "
+    "'says nothing' (the bit IS the point); escalating-absurd lists; dry dismissals\n"
+    "- genuine wit; a sideways observation or self-aware admission that makes you smirk\n"
+    "- specific, strange, or first-person WHEN it serves a joke or a real observation\n\n"
+    "LESS tpot (bad) — many of these look 'good' but are NOT tpot:\n"
+    "- generic motivational platitudes / self-help; engagement-bait; hashtag/emoji spam\n"
+    "- corporate / LinkedIn voice; promotional announcements / launches\n"
+    "- PURPLE or poetic / overwrought writing ('a laugh like stealing fire from the gods')\n"
+    "- mere NICHE-HOBBYIST TRIVIA — collector details or facts that are specific but have no wit or point\n"
+    "- SELF-SERIOUS hot-takes and earnest 'insight' that wants to sound smart; complaints / self-pity\n"
+    "- vague or assistant-like text\n\n"
+    "The test is taste, not impressiveness: a dry one-liner that makes you smirk beats a specific, "
+    "well-written, earnest observation. Wit and irony over insight and polish."
 )
 
 
