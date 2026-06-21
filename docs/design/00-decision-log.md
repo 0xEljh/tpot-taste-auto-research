@@ -158,9 +158,11 @@ lr 1e-4, r 16).** The fix from D32 landed — and it's the Phase-6 payoff:
 0.17 — a narrow "tidy-takeaway / listicle-thread" weak spot, far smaller than the platitude problem. v7.2 lever:
 up-weight corporate degradations / add harder corporate negatives.
 
-**Decision: v7.1 is the new best scorer** (beats v6 on every pollution axis AND generalizes). Repointing the
-LOCKED alias is held pending the full dipstick (`demo_eval --scorer v71`, running) + user review. v7/v7b kept as
-documented failures. **Next: Phase 6d — propagate the fix into the Writer** (still SFT'd on engagement-polluted
+**Decision: v7.1 is the new best scorer** (beats v6 on every pollution axis AND generalizes). Full dipstick
+(`demo_eval --scorer v71`, pushed to Notion) confirmed it on real data: top real goods are now genuine tpot, the
+OOD-non-English over-scoring is fixed (Russian tweets v6 rated high now score low), and the Writer's "work hard"
+improve now de-platitudes (+3.05 "useless advice") where v6 amplified it. **LOCKED alias repointed v6→v7.1**
+(reversible symlink, v6 preserved) — provisional, pending user review. v7/v7b kept as documented failures. **Next: Phase 6d — propagate the fix into the Writer** (still SFT'd on engagement-polluted
 goods, D28): re-curate goods via the judge → re-SFT → re-DPO vs v7.1. The rot is two layers deep (D32 note).
 
 ## 2026-06-21 — D32: Scorer v7 (judge-distilled) FAILS — distilling unrelated pairs learns register, not taste

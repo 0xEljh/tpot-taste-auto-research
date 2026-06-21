@@ -64,7 +64,7 @@ def main(
         L.append(s)
 
     w(f"# tpot-taste — demonstrative dipstick ({datetime.now():%Y-%m-%d %H:%M})")
-    w("Locked v6 Taste Scorer (higher = more tpot) · DPO-v2 Writer. For human qualitative sensing.")
+    w(f"Scorer: `{scorer.name}` (higher = more tpot) · Writer: `{writer.name}`. For human qualitative sensing.")
     w("Re-run `scripts/demo_eval.py` after each model iteration and diff. See decision-log D28.")
     w("")
 
