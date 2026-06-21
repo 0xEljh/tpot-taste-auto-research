@@ -7,8 +7,17 @@ Companion to `01-system-design.md` (the full design).
 
 ## STATUS (living)
 
-**Phase:** COMPLETE — all phases done. **Scorer LOCKED v6** · **Writer LOCKED DPO v2** (final) · **CLI usable** ·
-GRPO explored → hit the v6 ceiling (D27). **Last updated:** 2026-06-21.
+**Phase:** 6 (REOPENED by user, D28) — go beyond the first pass. v6/DPO-v2 are the *incumbents* to beat. Threads:
+(1) de-pollute the goods (curation), (2) demonstrative dipstick → Notion for human sensing, (3) self-play /
+LLM-judge scorer ("same model in scoring"), (4) reframe objectives. **Root:** replace the engagement proxy with a
+taste-vs-generic-virality signal. **Last updated:** 2026-06-21.
+
+- [~] Phase 6a: goods audit DONE (`scripts/audit_goods.py`, D28) — pollution is real but subtle (platitudes 1.2%
+      but +0.305 v6 lift; promo-creep is the bigger leak; v6's top is mostly genuine tpot). Naive heuristic filter
+      rejected (low-yield + lossy). Next: demonstrative dipstick → Notion; then LLM-judge labeler (curation + scorer).
+- [ ] Phase 6b: demonstrative dipstick eval set (scorer panel + writer panel) → `notion-cat` for human review.
+- [ ] Phase 6c: LLM-judge / self-play scorer experiment (3A), calibrated on the dipstick; relabel pairs sans engagement.
+- [ ] Phase 6d: re-curate goods with the calibrated judge (1B), retrain scorer, re-run audit + dipstick (before/after).
 
 - [x] Recon: env, GPU, data, stack (4 parallel research agents).
 - [x] Scaffold: `flake.nix`, `pyproject.toml` (pinned), dirs, `.env` (W&B), docs.
@@ -124,6 +133,82 @@ accelerate==1.13.0, bitsandbytes==0.49.2, datasets==4.3.0, numpy==2.2.6`.
 **Why.** Exactly the versions in `negative-space-learning-v2/uv.lock`, already in the uv cache → fast,
 first-try-clean resolve. vLLM and sentence-transformers kept in separate extras so they can't perturb the
 proven set. Per the compat research: pick torch first, let it pin triton/xformers; never bump piecemeal.
+
+## 2026-06-21 — D28: Phase 6 reopened (user) — audit the goods for platitude pollution; the diagnosis refines
+
+**User steer (Phase 6).** The first full loop is a good first pass; now go further. Four threads: (1) **data
+curation** — some data may be polluting toward platitudes (which work on *broad* Twitter, not tpot); (2) a
+**demonstrative dipstick** eval set pushed to Notion (`ncat`=`notion-cat`) for human qualitative sensing; (3) a
+**self-play scorer** — "use the same model for writing in the scoring" / proposer-solver-judge; (4) iteratively
+**reframe the research objectives**. Discuss-while-training to keep momentum.
+
+**Reframe (the root).** Every wall traces to one fact we already proved — **taste ⟂ engagement** (~0.53 pairwise,
+D13) — yet our goods are selected *entirely* by engagement (`z≥1.0` or `fav≥50`). Engagement-selection is a noisy
+proxy that over-includes *generic virality* (platitudes/promo/motivational). It propagates **twice**: into the
+scorer's `chosen` set AND (via `build_writer_sft.py:33`, ideate goods = `pairs.text_clean_w.unique()`) into the
+Writer's imitation targets. So GRPO's platitude-drift (D27) was **rot already in the soil**, not an RL artifact.
+
+**Audit (`scripts/audit_goods.py`, 10k train goods scored by v6).** The hypothesis holds but is *subtler* than
+"goods are full of platitudes":
+- **Heuristic platitudes are RARE (1.2%) but score HIGHER** — mean v6 **+0.843 vs +0.538** unmarked (**Δ +0.305**).
+  So v6 *does* over-reward the motivational register (corroborates the D17/D27 blind spot is partly data-driven).
+- **But v6's actual top-25 goods are mostly genuine tpot** — "Swedish word for speed is fart" (+7.62), "nobody is
+  more committed to the bit" (+6.38), "how many states can a boolean be in? …at least three" (+4.38). The scorer
+  is **not broadly broken**; its problem is the *boundary*, not the bulk.
+- **The real leaks are promotional/announcement creep**, not bare clichés: "We're launching the FLF Incubator
+  Fellowship 🚀" (+4.31), "Excited to announce the launch of my #AspiringAuthors community" (+3.44), "Wardley
+  Mapping … 🗺🤯✅💫 Free for" (+4.31) — engagement-y promo that isn't tpot taste, scored high.
+- **The heuristic has false positives**: it flags the genuinely-great "the trick to having a lot of good ideas is
+  having even more terrible ideas and being able to tell the difference" (+3.33) as a platitude.
+
+**Decision — do NOT ship a naive heuristic filter (1A).** Evidence kills it: 1.2% yield (removes almost nothing)
+*and* lossy (discards real aphorisms). Instead the lever is a **semantic taste-vs-generic labeler** — which is the
+**same tool** as the self-play judge (directive 3). So **directives 1 and 3 converge on one artifact** (an
+LLM-judge that separates tpot-taste from generic-competent-virality), and the **demonstrative dipstick (2) is its
+calibration anchor**. Sequence: dipstick → calibrate judge on it → judge both curates goods (1B) and relabels
+pairs (3A). The reframed objective: **discriminate tpot-taste from generic virality**, replacing the engagement
+proxy. `audit_goods.py` is the reusable before/after meter.
+
+**Dipstick result (`scripts/demo_eval.py` + `tpot_taste/eval/demo_panel.py`, pushed to Notion for review).**
+On clean hand-authored archetypes the failure is **systematic, not rare, and BIDIRECTIONAL**:
+- **`generic_viral` (motivational platitudes) is the TOP category: +2.66** > tpot_canon +1.68 > aphorism +1.59
+  → the spectrum is **BLURRED** (a "low" category outranks both "high" ones). The two sharpest aphorisms
+  ("you don't find your taste, you notice it" / "most advice is autobiography in disguise") score the **lowest**
+  of the highs (+0.77) — the scorer under-rates compressed insight and over-rates elaborated uplift.
+- **False negatives on real goods**: the **lowest-scored of 600** sampled real goods is a delightful tpot tweet —
+  "Thinking about Earth as a giant fusion reactor that spits out food" (**−5.09**); "occasional reminder that
+  labmuffin is the scott alexander of skincare" (−3.09). It under-rates terse/deadpan/oblique tpot — *the core
+  voice* — and is OOD-blind on non-English (scores Russian tweets +3.8).
+- **The Writer trap sprang**: `ideate("discipline")` top candidate = "Disciplined people don't make excuses…"
+  (**+4.59**, highest of the whole panel = a platitude); `improve` polishes a platitude draft instead of fixing it.
+
+**Refined axis:** the scorer rewards **legible uplift / advice-shape** over **earned specificity / deadpan** — almost
+exactly *anti*-tpot. This sharpens the judge target (D29): the rubric must DEMOTE uplift/advice/promo AND PROMOTE
+terse/oblique/specific. The dipstick is now the constant ruler for every future scorer (re-run + diff).
+
+## 2026-06-21 — D29: The taste judge — directives 1+3 converge on one artifact (design + plan)
+
+**Decision.** Build a **taste-vs-generic judge** (`tpot_taste/scoring/judge.py`) — a model that judges *tpot taste*
+rather than *engagement* — as the single artifact that serves BOTH curation (drop generic-viral goods) and the
+scorer (relabel/mine preference pairs without the engagement proxy). This is the user's "use the same model in
+scoring" / proposer-solver-judge, made concrete. Pure helpers TDD'd (`tests/test_judge.py`, 6 pass): rubric
+prompt, robust `parse_verdict`/`parse_score`, and `agree_winner` (judge both orders, accept only if they agree →
+kills position bias). Pairwise is primary (matches the BT scorer + less miscalibration); pointwise score is for
+curation thresholds.
+
+**Approaches considered (full text in the Phase-6 message).**
+- **A — LLM-as-judge preference mining (minimal):** rubric-driven judge → train BT scorer on judge prefs not
+  engagement. *Risk:* a 3B base judge may share the platitude-loving prior (the very failure). Cheap, testable.
+- **B — self-play loop, human-anchored (ideal):** proposer (manufactures tpot-vs-generic contrasts) → solver
+  (writer) → judge (calibrated on the dipstick) → prefs train both models → repeat. Unbounded clean data; risk
+  of self-reward collapse without the human anchor.
+- **C — unified generative reward model (lateral):** one Qwen that writes AND self-scores. Elegant, one artifact;
+  role interference + slower scoring.
+
+**Plan: A now, B as destination, C's generative-verifier as B's judge mechanism.** The non-negotiable guard:
+the **dipstick is the judge's exam** — a judge is only trusted once it ranks the panel's tpot>platitude (which v6
+fails). Next step: `scripts/judge_eval.py` grades the local-Qwen judge on the panel; if 3B is too weak, escalate
+the rubric → few-shot → a larger judge (API) for offline labeling, distilled into the 3B BT scorer (v7).
 
 ## 2026-06-21 — D27: GRPO v2 beats v6 (0.65) but DRIFTS to platitudes — the v6 ceiling, qualitatively
 
