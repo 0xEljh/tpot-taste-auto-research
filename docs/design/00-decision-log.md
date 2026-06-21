@@ -137,6 +137,29 @@ accelerate==1.13.0, bitsandbytes==0.49.2, datasets==4.3.0, numpy==2.2.6`.
 first-try-clean resolve. vLLM and sentence-transformers kept in separate extras so they can't perturb the
 proven set. Per the compat research: pick torch first, let it pin triton/xformers; never bump piecemeal.
 
+## 2026-06-21 — D36: Human-calibrate the judge (user's pick) + GRPO redux vs v7.1 (bias-to-action)
+
+**User steer.** Of the open questions, do **(1) human-calibrate the judge**; **bias to action/experimentation** on
+the rest; **taste pluralism** is a luxury / feasibility-gated (likely not enough data for multiple scorers — open
+to attempting + assessing IF feasible).
+
+**Why calibrate.** The judge's taste = base-model prior × *our* rubric, graded on *our* hand-authored archetypes —
+the one thing we can't bootstrap is whether it matches the **human's** taste. Until measured, "the judge looks
+right" is an eyeball, not a number.
+
+**Setup (`scripts/build_calibration_set.py` + Notion).** Sample 60 real tweets **stratified across the judge's
+score range** (5 bins × 12 — so we test it everywhere, not just the extremes), with the judge score **hidden** (no
+anchoring). Created a Notion DB (data source `fae195b7…`, under "auto-research social media taste") with a one-click
+**Taste** select (👍 tpot / 🤔 borderline / 👎 not tpot). `scripts/score_calibration.py` reads the labels back,
+joins the hidden judge score, and reports **Spearman(judge, human)** + binary agreement + the judge's **false
+positives** (rubric over-includes) and **false negatives** (rubric misses) — the concrete rubric-tuning targets.
+Pending the human's labels → tune the rubric to *their* taste → re-validate → optionally re-distill a v7.x.
+
+**Bias-to-action (parallel):** **GRPO redux** (`train_grpo.py`, from DPO-v2, reward = v7.1 + guardrails, num_gen 8,
+rep_penalty 3.0, 300 steps) — tests D35: against a scorer that no longer rewards platitudes, does RL now give a
+*real* gain instead of the D27 drift? Result TBD. v7.2 (corporate residual) and the non-English curation leak are
+queued tactical polish.
+
 ## 2026-06-21 — D35: Writer propagation is a WASH — the platitude problem was a SCORER problem, not a Writer one
 
 **Result.** Re-SFT on v7.1-curated goods (`qwen3b-sft-v2`) + re-DPO vs v7.1 (`qwen3b-dpo-v2sft`). The FAIR eval —
