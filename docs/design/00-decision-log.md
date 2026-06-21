@@ -46,9 +46,9 @@ Companion to `01-system-design.md` (the full design).
 - [x] Phase 4a: DPO DONE — v1 length-hacked (caught by the audit, D21); **v2 = length-penalized best-of-N**
       beats SFT **0.75** (v6) with the hack GONE (112 vs 123 chars) [D22]. **Writer LOCKED = DPO v2**
       (`outputs/writer/qwen3b-dpo-v2`, alias `qwen3b-writer-LOCKED`). Progression base→SFT(0.67)→DPO v2(0.75).
-- [~] Phase 4b: GRPO v1 = **TIE with DPO v2** (0.52, weak push; guardrails held; repetition-degeneration note)
-      [D25]. → GRPO v2 on **Unsloth** (faster + bigger num_gen + repetition penalty) to push harder / test the
-      v6 ceiling. Writer stays LOCKED = DPO v2 until something clearly beats it. ← in progress
+- [~] Phase 4b: GRPO v1 = **TIE with DPO v2** (0.52, weak push) [D25]. **Unsloth loads fine on our stack but
+      memory wasn't the constraint** (plain TRL fits num_gen=8) → deferred [D26]. **GRPO v2 training** (num_gen 8,
+      lr 2e-6, rep_penalty 3.0, 300 steps) → eval vs DPO v2 (ceiling vs under-trained?). Writer stays DPO v2. ← in progress
 - [x] Phase 5 DONE: `TasteEngine` (`tpot_taste/engine.py`) + `scripts/tpot.py` CLI (score/ideate/improve/repl,
       best-of-N: Writer generates → Scorer ranks), 8 TDD tests; `docs/benchmark.md` scorecard [D23]. End-to-end usable.
 - [ ] Phase 4: DPO, then GRPO vs. Scorer reward + guardrails.
@@ -124,6 +124,21 @@ accelerate==1.13.0, bitsandbytes==0.49.2, datasets==4.3.0, numpy==2.2.6`.
 **Why.** Exactly the versions in `negative-space-learning-v2/uv.lock`, already in the uv cache → fast,
 first-try-clean resolve. vLLM and sentence-transformers kept in separate extras so they can't perturb the
 proven set. Per the compat research: pick torch first, let it pin triton/xformers; never bump piecemeal.
+
+## 2026-06-21 — D26: Unsloth verdict (loads, but memory wasn't the constraint) + GRPO v2 (stronger push)
+
+**Unsloth question (user-raised) — probed directly.** `FastLanguageModel` **loads cleanly on our pinned stack**
+(unsloth 2026.4.8 patches Qwen2 on transformers 5.5, 4-bit OK) — viable, no version churn. But two findings
+reframe it: (1) **vLLM isn't installed**, so Unsloth's headline win (vLLM-colocate generation) needs a heavy/risky
+vllm install; (2) **memory was NOT the binding constraint** — plain TRL fits the stronger config (num_gen=8,
+batch 8) on 12 GB, no OOM. So here Unsloth buys *speed* (the ~22 s/step generation), not *feasibility*.
+**Decision: defer Unsloth** — adopt only if going bigger (7B) or installing vLLM for many-step GRPO. (Resolves
+D18's "reserve Unsloth for where headroom is needed": at 3B / num_gen≤8, headroom wasn't needed.)
+
+**GRPO v2 (stronger push, plain TRL):** num_gen 4→**8** (lower-variance group advantages), lr 1e-6→**2e-6**,
+**rep_penalty 3.0** (closes the repetition blind spot v1 exposed; `repetition_ratio` + 2 tests), 200→**300** steps,
+from DPO v2. Tests the v1 "weak push" hypothesis: still a tie → we're at the **v6 ceiling** (the lever is a better
+scorer, not more RL); a win → v1 was under-trained. Judge on win-rate + length/bait/repetition audit + a human read.
 
 ## 2026-06-21 — D25: GRPO v1 ≈ DPO v2 (weak push) — Unsloth v2 to push harder / disambiguate
 

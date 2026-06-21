@@ -36,6 +36,8 @@ def main(
     length_target: int = 200,
     length_penalty: float = 0.01,
     bait_penalty: float = 2.0,
+    rep_penalty: float = 0.0,
+    run_name: str = "writer-grpo-v1",
     smoke: bool = False,
 ) -> None:
     import random
@@ -78,7 +80,8 @@ def main(
         texts = [c[-1]["content"] if isinstance(c, list) else str(c) for c in completions]
         base_scores = score_texts(sm, stok, texts, batch_size=16)
         return [reward_components(t, s, length_target=length_target, length_penalty=length_penalty,
-                                  bait_penalty=bait_penalty) for t, s in zip(texts, base_scores)]
+                                  bait_penalty=bait_penalty, rep_penalty=rep_penalty)
+                for t, s in zip(texts, base_scores)]
 
     bnb = BitsAndBytesConfig(load_in_4bit=True, bnb_4bit_quant_type="nf4",
                              bnb_4bit_compute_dtype=torch.bfloat16, bnb_4bit_use_double_quant=True)
@@ -107,7 +110,7 @@ def main(
         save_strategy=("no" if smoke else "steps"),
         save_steps=100,
         report_to=("none" if smoke else "wandb"),
-        run_name="writer-grpo-v1",
+        run_name=run_name,
         use_vllm=False,
     )
     trainer = GRPOTrainer(model=model, reward_funcs=taste_reward, args=cfg, train_dataset=ds, processing_class=tok)

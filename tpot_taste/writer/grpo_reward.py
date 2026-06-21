@@ -26,6 +26,15 @@ def is_baity(text: str) -> bool:
     return False
 
 
+def repetition_ratio(text: str) -> float:
+    """Fraction of repeated word-trigrams: 0.0 = none, →1.0 = very repetitive. <6 words → 0."""
+    words = text.split()
+    if len(words) < 6:
+        return 0.0
+    tris = [tuple(words[i : i + 3]) for i in range(len(words) - 2)]
+    return 1.0 - len(set(tris)) / len(tris)
+
+
 def reward_components(
     text: str,
     base_score: float,
@@ -33,10 +42,16 @@ def reward_components(
     length_target: int = 200,
     length_penalty: float = 0.01,
     bait_penalty: float = 2.0,
+    rep_penalty: float = 0.0,
 ) -> float:
-    """v6 score − λ·max(0, len−target) − bait_penalty·[is_baity]."""
+    """v6 score − λ·max(0, len−target) − bait_penalty·[is_baity] − rep_penalty·repetition.
+
+    rep_penalty closes the v6 blind spot GRPO v1 exposed (it rewarded "X. X. X." repetition); default 0
+    keeps the v1 reward unchanged.
+    """
     r = float(base_score)
     r -= length_penalty * max(0, len(text) - length_target)
     if is_baity(text):
         r -= bait_penalty
+    r -= rep_penalty * repetition_ratio(text)
     return r

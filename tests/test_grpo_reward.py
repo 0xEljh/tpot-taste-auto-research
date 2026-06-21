@@ -1,7 +1,7 @@
 """TDD for the multi-objective GRPO reward components (Phase 4b). Pure — no torch."""
 from __future__ import annotations
 
-from tpot_taste.writer.grpo_reward import is_baity, reward_components
+from tpot_taste.writer.grpo_reward import is_baity, repetition_ratio, reward_components
 
 
 def test_clean_post_unpenalized():
@@ -34,3 +34,15 @@ def test_length_and_bait_combine():
     r = reward_components("like if you agree " + "x" * 250, 1.0,
                           length_target=200, length_penalty=0.01, bait_penalty=2.0)
     assert r < 0  # over-length AND baity
+
+
+def test_repetition_ratio():
+    assert repetition_ratio("i will tell you i will tell you i will tell you") > 0.5
+    assert repetition_ratio("a varied sentence with all distinct words right here") < 0.1
+    assert repetition_ratio("too short here") == 0.0  # < 6 words
+
+
+def test_rep_penalty_demotes_repetitive():
+    repetitive = "go away go away go away go away go away"
+    clean = "a thoughtful and varied little remark about modern life"
+    assert reward_components(repetitive, 3.0, rep_penalty=3.0) < reward_components(clean, 3.0, rep_penalty=3.0)
