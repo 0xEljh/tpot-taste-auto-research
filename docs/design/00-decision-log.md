@@ -7,8 +7,8 @@ Companion to `01-system-design.md` (the full design).
 
 ## STATUS (living)
 
-**Phase:** 4 — preference (DPO/GRPO). **Scorer LOCKED at v6**; **Writer SFT v1 done** (win-rate 0.67 vs base).
-**Last updated:** 2026-06-20.
+**Phase:** 4a — DPO (best-of-N vs v6 reward). **Scorer LOCKED at v6**; **Writer SFT v1 done** (win-rate 0.67 vs base).
+**Last updated:** 2026-06-21.
 
 - [x] Recon: env, GPU, data, stack (4 parallel research agents).
 - [x] Scaffold: `flake.nix`, `pyproject.toml` (pinned), dirs, `.env` (W&B), docs.
@@ -43,7 +43,9 @@ Companion to `01-system-design.md` (the full design).
       `scripts/train_writer.py` (TRL SFT, 4-bit QLoRA, full-text). **SFT v1 trained** (loss 6.5→1.1) **+ evaluated:
       win-rate 0.67 vs base** (improve 0.85), decisive tpot-voice transfer (base = assistant-slop scored -5..-6 by
       v6) [D18/D19]. Adapter `outputs/writer/qwen3b-sft-v1`; `scripts/eval_writer.py`.
-- [~] Phase 4: preference — best-of-N → DPO (then GRPO) vs the v6 reward + length/bait/KL guardrails (D5). ← next
+- [~] Phase 4a: DPO — infra built (compat shim for a TRL 0.24 bug [D20], `dpo_data.py` + 6 tests,
+      `build_dpo_pairs.py`, `train_dpo.py`). Best-of-N pairs building (v6-judged); then DPO from SFT + eval
+      vs SFT (win-rate + length/bait drift audit). Then Phase 4b GRPO, Phase 5 CLI + benchmark. ← in progress
 - [ ] Phase 4: DPO, then GRPO vs. Scorer reward + guardrails.
 - [ ] Phase 5: integration CLI + final benchmark report + reward-hacking audit.
 
@@ -117,6 +119,17 @@ accelerate==1.13.0, bitsandbytes==0.49.2, datasets==4.3.0, numpy==2.2.6`.
 **Why.** Exactly the versions in `negative-space-learning-v2/uv.lock`, already in the uv cache → fast,
 first-try-clean resolve. vLLM and sentence-transformers kept in separate extras so they can't perturb the
 proven set. Per the compat research: pick torch first, let it pin triton/xformers; never bump piecemeal.
+
+## 2026-06-21 — D20: TRL 0.24 × transformers 5.5 import bug — root-fixed in a compat shim
+
+Phase 4 blocker: `from trl import DPOTrainer` crashes with `No module named 'mergekit'` (then
+`llm_blender`). **Root cause:** transformers 5.5's `_is_package_available()` returns a `(bool, version)`
+**tuple**, but TRL 0.24's `is_X_available()` helpers return it directly and guard imports with
+`if is_X_available():` — a non-empty tuple is always truthy, so TRL eagerly imports absent optional deps.
+**Fix:** `tpot_taste/writer/_trl_compat.py::patch_trl_availability()` coerces the cached
+`trl.import_utils._*_available` tuples to plain bools before the trainer imports — zero env change, no
+dependency risk (vs. installing mergekit/llm_blender, which could downgrade the pinned transformers==5.5.0,
+D6). Call it before any `from trl import DPOTrainer/GRPOTrainer`. Also needed for Phase 4b GRPO.
 
 ## 2026-06-20 — D19: Writer SFT v1 works — tpot voice transfer confirmed (win-rate 0.67 vs base)
 
