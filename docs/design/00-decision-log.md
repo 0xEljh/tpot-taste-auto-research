@@ -134,6 +134,36 @@ accelerate==1.13.0, bitsandbytes==0.49.2, datasets==4.3.0, numpy==2.2.6`.
 first-try-clean resolve. vLLM and sentence-transformers kept in separate extras so they can't perturb the
 proven set. Per the compat research: pick torch first, let it pin triton/xformers; never bump piecemeal.
 
+## 2026-06-21 — D32: Scorer v7 (judge-distilled) FAILS — distilling unrelated pairs learns register, not taste
+
+**v7 (`qwen3b-bt-v7-judge`, 997 judge-taste pairs, 2 ep, lr 1e-4).** Train acc **0.966** — but it's a mirage:
+- **Held-out taste acc = 0.536 (chance)** on judge-labeled real pairs (`taste_v7_test_pairs`). No generalization.
+- **Panel INVERTED** (`score_panel.py`): tpot_canon is v7's **lowest** category (−6.33), bait its highest (−1.68).
+- The goods **audit looks better but SPURIOUSLY**: platitude delta flips +0.305 (v6) → −0.455 (v7). v7 demotes the
+  whole polished/advice **register** — which includes genuine tpot prose — not taste. One metric (audit) fooled;
+  the held-out pairwise + the panel caught it. The project's thesis once more: never trust a single number.
+
+**Diagnosis.** Distilling the judge from ~1000 **unrelated** chosen/rejected real tweets is too hard for a LoRA
+scalar head → it overfits a surface **register confound**: real tpot tweets are terser / lowercase / fragmentary,
+real generic-viral (news/promo/platitude) is polished / complete, so the head learns *register*, not *taste* (it
+even ranks my polished tpot archetypes like "rejected"). Contrast: v6 (deopt) generalized BECAUSE chosen/rejected
+were the **same tweet degraded** — a consistent, learnable, register-matched contrast. The judge is fine (D31);
+the *distillation target* was wrong.
+
+**Fix — judge-ANCHORED deopt (the synthesis, → v7.1).** Use the validated judge to pick CLEAN tpot anchors
+(score ≥ hi — fixes D28's polluted anchor) → degrade each into generic/platitude **at matched length/register**
+(same-content contrast = learnable like v6; register-matched = kills the confound). Scales to 5–10k via multiple
+degradations/anchor. Combine with the judge-taste pairs for semantic breadth. (Alt B: use the judge DIRECTLY as
+the reward — slow but correct, works now. Alt C: just scale the unrelated judge-taste pairs — uncertain, likely
+still hard.) First a cheap **diagnostic**: regularized retrain on the same 997 (1 ep, lower lr, r=8) — if held-out
+stays ~chance, it's the method (→ judge-anchored deopt), not just overfit. v7 kept as a documented failure.
+
+**Diagnostic result:** v7b (1 ep, lr 5e-5, r=8) → held-out taste acc **0.493 (still chance)**; the panel was less
+broken (tpot_canon back on top, generic_viral down to +1.44) but the held-out pairwise stayed flat across BOTH
+regularizations. **Confirmed: it's the METHOD, not overfit.** Unrelated-pair distillation can't learn
+generalizable taste at this scale → proceeding with judge-anchored deopt (`build_taste_deopt_pairs.py` →
+`taste_v71_train_pairs` = anchored degradations + judge-taste breadth → v7.1).
+
 ## 2026-06-21 — D31: Judge VALIDATED on real data — it corrects v6 both ways → it becomes the labeler (v7)
 
 **`scripts/judge_vs_v6.py`, 236 real goods, judge vs v6.** Spearman = **+0.202** (they rank very differently —
