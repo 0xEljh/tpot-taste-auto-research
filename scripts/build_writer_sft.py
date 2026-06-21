@@ -25,12 +25,15 @@ def main(
     pairs_path: Path = Path("data/splits/deopt_v6_train_pairs.parquet"),
     out: Path = Path("data/splits/writer_sft_train.jsonl"),
     splits_dir: Path = Path("data/splits"),
+    goods_path: Path = typer.Option(None, help="ideate goods source; default = pairs' chosen.unique()"),
     n_ideate: int = 10000,
     n_improve: int = 10000,
     seed: int = 0,
 ) -> None:
     pairs = pl.read_parquet(pairs_path)
-    goods = pairs["text_clean_w"].unique().to_list()
+    # ideate goods: a separate curated set (v7.1-curated, Phase 6d) if given, else the pairs' chosen
+    goods = (pl.read_parquet(goods_path)["text_clean"].to_list() if goods_path
+             else pairs["text_clean_w"].unique().to_list())
 
     forbidden: set[str] = set()
     for name in ["test_temporal_tweets", "test_unseen_authors_tweets"]:

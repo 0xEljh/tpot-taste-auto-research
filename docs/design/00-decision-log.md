@@ -134,6 +134,27 @@ accelerate==1.13.0, bitsandbytes==0.49.2, datasets==4.3.0, numpy==2.2.6`.
 first-try-clean resolve. vLLM and sentence-transformers kept in separate extras so they can't perturb the
 proven set. Per the compat research: pick torch first, let it pin triton/xformers; never bump piecemeal.
 
+## 2026-06-21 — D34: Phase 6d — propagate the fix into the Writer (re-curate goods → re-SFT → re-DPO)
+
+**Why.** The platitude rot is two layers deep (D32): the Scorer is fixed (v7.1, D33), but the Writer was SFT'd
+on the SAME engagement-polluted goods (D28) — so it still *generates* platitude/promo candidates. Fix both
+layers: clean the generation distribution (re-SFT on curated goods) and the preference (re-DPO vs v7.1).
+
+**6d.1 — re-curate goods (`scripts/curate_goods.py`).** The distillation payoff: v7.1 is now a *fast* scalar
+taste scorer, so use it to curate at scale — score a 41,935-tweet pool (uploader across ALL z, to recover the
+deadpan tpot engagement buried, + liked) and keep the **top 12,000 by taste** (per-author cap 60). Kept goods
+score v7.1 p50 **+4.03** (threshold +3.16). Eyeball: genuinely tpot — "do not meddle in the affairs of egregores,
+for you are gullible and made of compute" (+7.91), "this is proving to be a scissor statement" (+4.44), "Guy
+beside me on this flight out of SFO just asked if I wanted to invest in his OpenAI SPV" (+4.12) — **no
+platitude/promo/news** (vs the old engagement goods). Minor: a few non-English latin-script tweets leak (filter
+tweak for later).
+
+**6d.2 — re-SFT data.** `build_writer_sft.py` parametrized with `--goods-path`: ideate = the 12k curated goods,
+improve = the judge-anchored deopt pairs (degraded→tpot, register-matched) → **16,313 records**
+(`writer_sft_v2_train.jsonl`). **6d.3 — re-SFT → `qwen3b-sft-v2`** (running, 2 ep). **Next: re-DPO vs v7.1**
+(best-of-N ranked by the v7.1 reward) → writer v2, then eval (writer dipstick + A/B vs the old DPO-v2 writer).
+Whole-system de-pollution: reward (v7.1) + generation (re-SFT) + preference (re-DPO).
+
 ## 2026-06-21 — D33: Scorer v7.1 (judge-anchored deopt) WORKS — the platitude blind spot is fixed
 
 **v7.1 (`qwen3b-bt-v71-judge-deopt`, 5,317 pairs = 4,320 judge-anchored degradations + 997 judge-taste, 1 ep,
