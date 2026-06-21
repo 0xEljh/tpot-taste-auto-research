@@ -137,6 +137,33 @@ accelerate==1.13.0, bitsandbytes==0.49.2, datasets==4.3.0, numpy==2.2.6`.
 first-try-clean resolve. vLLM and sentence-transformers kept in separate extras so they can't perturb the
 proven set. Per the compat research: pick torch first, let it pin triton/xformers; never bump piecemeal.
 
+## 2026-06-21 — D37: Aligning the judge to the human — rubric is NOT the lever, few-shot exemplars ARE (partly)
+
+Follow-up to D36's weak alignment (Spearman 0.126). Two experiments:
+
+**1. Rubric tuning barely steers the judge.** RUBRIC v1→v2 (wit-focused): in-sample Spearman **0.126 → 0.142**,
+precision unchanged; on a fair 48-item held-out, rubric-only is **+0.062**. The judge still rates "a laugh like
+stealing fire from the gods" a 10 after I explicitly made purple prose a negative. **The base 3B's taste prior is
+rigid to abstract rules** — prompt-engineering the rubric has little leverage.
+
+**2. Few-shot human exemplars ARE a lever (`judge_fewshot_test.py`).** 12 of the human's labeled examples
+in-context: held-out Spearman **+0.062 → +0.232** (~4×, on a fair held-out split). So the human's *examples* teach
+what *rules* can't — but 0.23 is still weak; 12 exemplars isn't enough, and 60 items is too few to both
+demonstrate and test. **Alignment scales with labels.**
+
+**The human's taste is COHERENT (characterized from the 13 tpot / 28 not labels).** tpot = **wit / deadpan /
+absurdist / genuine delight** (meta-jokes "many people do not realize this but this is actually true";
+escalating-absurd lists; "warp" in GPU = "warp and weft"; "become insane about your interests"). NOT-tpot =
+**self-serious intellectual** ("postmodern moral relativism is important" — trying to sound smart), promo/hashtags,
+mundane updates, niche trivia/namedrops, humblebrags. The crux the judge misses: **rejects earnest-smart, rewards
+witty-deadpan, indifferent to specificity itself** — a get-the-joke distinction.
+
+**Honest reframe.** "Elicit taste from the base model via a rubric" has a ceiling = the base model's taste
+resolution. The platitude fix (v7.1) worked because platitude-vs-not is *coarse* and base-model-agreeable; the
+human's *fine* taste is not. **Path forward:** (a) testing a **7B judge** (is size the ceiling? — running), and
+(b) **more human labels** → few-shot (or fine-tune) the judge → re-distill. Next: prep a larger fresh labeling
+round; build few-shot into the judge pipeline; re-distill only once alignment is worth it (0.23 is not yet).
+
 ## 2026-06-21 — D36: Human-calibrate the judge (user's pick) + GRPO redux vs v7.1 (bias-to-action)
 
 **User steer.** Of the open questions, do **(1) human-calibrate the judge**; **bias to action/experimentation** on
@@ -155,10 +182,26 @@ joins the hidden judge score, and reports **Spearman(judge, human)** + binary ag
 positives** (rubric over-includes) and **false negatives** (rubric misses) — the concrete rubric-tuning targets.
 Pending the human's labels → tune the rubric to *their* taste → re-validate → optionally re-distill a v7.x.
 
-**Bias-to-action (parallel):** **GRPO redux** (`train_grpo.py`, from DPO-v2, reward = v7.1 + guardrails, num_gen 8,
-rep_penalty 3.0, 300 steps) — tests D35: against a scorer that no longer rewards platitudes, does RL now give a
-*real* gain instead of the D27 drift? Result TBD. v7.2 (corporate residual) and the non-English curation leak are
-queued tactical polish.
+**Bias-to-action (parallel):** **GRPO redux** launched, then **STOPPED at 82/300** — the calibration result
+(below) undercut it: optimizing the writer against v7.1 is premature when v7.1 itself is weakly aligned with the
+human. Re-runnable against a better scorer later.
+
+**CALIBRATION RESULT (60 human labels, provisional per user).** The eyeball lied — measured, the judge is only
+**weakly aligned with the human**: **Spearman(judge, human) = +0.126**, precision **0.43** @ judge≥6 (human mix:
+13 tpot / 19 borderline / 28 not — the human is much *stricter* than the judge). The error structure is coherent:
+- **Judge FALSE POSITIVES** (over-includes): niche-hobbyist trivia (Grimlock collector detail, judge 9), PURPLE /
+  poetic prose ("a laugh like stealing fire from the gods"), crypto-humblebrag, complaints, non-English.
+- **Judge FALSE NEGATIVES** (misses): **deadpan / ironic / absurdist HUMOR** whose surface looks casual or empty —
+  "many people do not realize this but this is actually true" (meta-joke, judge 0), the waterboarding-as-exposure-
+  therapy escalating list (judge 2), "a drug-fueled sex cult is not a particularly ambitious project, imho" (judge 0).
+
+**The fix — RUBRIC v2 (`judge.py`).** The human's tpot is **WIT** (dry/ironic/deadpan), not insight/polish. v2
+leads with humor, adds explicit negatives for purple prose / niche trivia / self-serious takes. (Caveat: the
+v1 win was real for *platitudes*, but the judge has its OWN biases that don't match the human — the platitude fix
+was necessary, not sufficient.) **Re-test (`rejudge_calibration.py`)** on the same 60 = in-sample sanity (tuned on
+them), plus a panel check that v2 still rejects platitude/promo/bait. **If v2 holds → re-distill scorer v7.2**
+(re-judge pool with v2 → judge-anchored deopt → train) and ship a **fresh** calibration set (v2-scored) for an
+*unbiased* next labeling round. The loop: human labels → measure → tune → re-distill → re-measure.
 
 ## 2026-06-21 — D35: Writer propagation is a WASH — the platitude problem was a SCORER problem, not a Writer one
 
