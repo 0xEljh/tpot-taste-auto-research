@@ -137,6 +137,28 @@ accelerate==1.13.0, bitsandbytes==0.49.2, datasets==4.3.0, numpy==2.2.6`.
 first-try-clean resolve. vLLM and sentence-transformers kept in separate extras so they can't perturb the
 proven set. Per the compat research: pick torch first, let it pin triton/xformers; never bump piecemeal.
 
+## 2026-06-21 — D39: Linchpin dry-run — does few-shot alignment survive distillation? (inconclusive, label-gated)
+
+Tests the core unproven link of the plan (labels → few-shot judge → distill → aligned scorer) on the current 60
+provisional labels. Pipeline (`fewshot_distill_test.py` + `eval_scorer_vs_human.py`, built + validated end-to-end):
+16 exemplars (8+8) → few-shot-judge 1500 pool → anchors → deopt pairs → train `v72fs` → eval on the 44 held-out.
+
+**Results (44 held-out human labels — 5 tpot / 20 not / 19 borderline, very noisy):**
+- v7.1 (rubric-distilled): Spearman(scorer, human) **0.235**, precision 0.25.
+- v72fs (few-shot-distilled): Spearman **0.275**, precision 0.00. Edge of +0.04 is within noise; precision
+  contradicts. **Inconclusive** — only **262 training pairs** (the few-shot judge is STRICT: 131 anchors ≥7 of
+  1500 = ~9%, vs the rubric judge's ~37% — it absorbed the human's high bar) on 44 provisional labels.
+
+**Two real takeaways.** (1) The few-shot judge **learned the human's strictness** (9% pass) — good sign it's
+absorbing the taste, but it means scaling the distill needs a LARGE few-shot-judged pool (slow). (2) **Both
+distilled scorers (~0.25) align with the human BETTER than the raw judges (~0.06–0.13)** — the deopt-pair
+distillation adds alignment *beyond* the judge's pointwise taste; the scorer isn't capped at its teacher. Both
+are still weak (~0.25), so not adopted.
+
+**State: the alignment thread is LABEL-GATED.** Pipeline validated + ready; round-2 set (80 items) in Notion;
+`build_score_prompt_fewshot` / `judge_score_batch(exemplars=…)` are primitives. A clean linchpin answer + a
+worthwhile v7.2 both need round-2's labels (≈140 total). Taken as far as it honestly goes without them.
+
 ## 2026-06-21 — D38: 7B judge ≈ 3B — size isn't the ceiling; the lever is MORE HUMAN LABELS (few-shot)
 
 **7B test (`judge_fewshot_test.py --base Qwen2.5-7B-Instruct`):** rubric-only Spearman **+0.066** (3B: 0.062),

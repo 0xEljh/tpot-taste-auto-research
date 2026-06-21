@@ -132,12 +132,14 @@ def judge_score(model, tok, text: str, **kw) -> float | None:
     return parse_score(_generate(model, tok, build_score_prompt(text), **kw))
 
 
-def judge_score_batch(model, tok, texts: list[str], *, batch_size: int = 16,
-                      max_new_tokens: int = 80) -> list[float | None]:
+def judge_score_batch(model, tok, texts: list[str], *, exemplars: list[tuple[str, float]] | None = None,
+                      batch_size: int = 16, max_new_tokens: int = 80, max_length: int = 768) -> list[float | None]:
     """Pointwise taste scores for many texts via LEFT-padded batched greedy generation (D31).
 
     ~batch_size× faster than looping judge_score — makes corpus-scale judge-labeling feasible (minutes,
-    not hours). Restores the tokenizer's padding side afterwards.
+    not hours). If `exemplars` is given, each prompt is FEW-SHOT (D37 — the alignment lever): the human's
+    labeled examples are prepended in-context (use a smaller batch_size + larger max_length, the prompts
+    are long). Restores the tokenizer's padding side afterwards.
     """
     import torch
 
@@ -147,9 +149,9 @@ def judge_score_batch(model, tok, texts: list[str], *, batch_size: int = 16,
     try:
         for i in range(0, len(texts), batch_size):
             bt = texts[i : i + batch_size]
-            prompts = [tok.apply_chat_template(build_score_prompt(t), tokenize=False,
-                                               add_generation_prompt=True) for t in bt]
-            enc = tok(prompts, return_tensors="pt", padding=True, truncation=True, max_length=768).to(model.device)
+            msgs = [build_score_prompt_fewshot(t, exemplars) if exemplars else build_score_prompt(t) for t in bt]
+            prompts = [tok.apply_chat_template(m, tokenize=False, add_generation_prompt=True) for m in msgs]
+            enc = tok(prompts, return_tensors="pt", padding=True, truncation=True, max_length=max_length).to(model.device)
             with torch.no_grad():
                 g = model.generate(**enc, max_new_tokens=max_new_tokens, do_sample=False,
                                    pad_token_id=tok.pad_token_id)
