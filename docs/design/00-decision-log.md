@@ -7,7 +7,7 @@ Companion to `01-system-design.md` (the full design).
 
 ## STATUS (living)
 
-**Phase:** 4a — DPO (best-of-N vs v6 reward). **Scorer LOCKED at v6**; **Writer SFT v1 done** (win-rate 0.67 vs base).
+**Phase:** 4b/5 — GRPO + CLI. **Scorer LOCKED v6**; **Writer LOCKED = DPO v2** (0.75 vs SFT, length-hack fixed).
 **Last updated:** 2026-06-21.
 
 - [x] Recon: env, GPU, data, stack (4 parallel research agents).
@@ -43,9 +43,11 @@ Companion to `01-system-design.md` (the full design).
       `scripts/train_writer.py` (TRL SFT, 4-bit QLoRA, full-text). **SFT v1 trained** (loss 6.5→1.1) **+ evaluated:
       win-rate 0.67 vs base** (improve 0.85), decisive tpot-voice transfer (base = assistant-slop scored -5..-6 by
       v6) [D18/D19]. Adapter `outputs/writer/qwen3b-sft-v1`; `scripts/eval_writer.py`.
-- [~] Phase 4a: DPO — v1 done: beats SFT **0.67** (v6) BUT **length-hacked** (175 vs 121 chars) + occasional
-      bait drift; the audit caught it [D21]. v2 = length-penalized best-of-N selection (rebuild + retrain +
-      re-eval). Then Phase 4b GRPO, Phase 5 CLI + benchmark. ← in progress
+- [x] Phase 4a: DPO DONE — v1 length-hacked (caught by the audit, D21); **v2 = length-penalized best-of-N**
+      beats SFT **0.75** (v6) with the hack GONE (112 vs 123 chars) [D22]. **Writer LOCKED = DPO v2**
+      (`outputs/writer/qwen3b-dpo-v2`, alias `qwen3b-writer-LOCKED`). Progression base→SFT(0.67)→DPO v2(0.75).
+- [ ] Phase 4b: GRPO — on-policy push from DPO v2 vs the v6 reward + length/bait/KL guardrails (§3); vLLM, 12GB-tight.
+- [ ] Phase 5: integration CLI (`score`/`ideate`/`improve`) + final benchmark report + reward-hacking audit.
 - [ ] Phase 4: DPO, then GRPO vs. Scorer reward + guardrails.
 - [ ] Phase 5: integration CLI + final benchmark report + reward-hacking audit.
 
@@ -119,6 +121,26 @@ accelerate==1.13.0, bitsandbytes==0.49.2, datasets==4.3.0, numpy==2.2.6`.
 **Why.** Exactly the versions in `negative-space-learning-v2/uv.lock`, already in the uv cache → fast,
 first-try-clean resolve. vLLM and sentence-transformers kept in separate extras so they can't perturb the
 proven set. Per the compat research: pick torch first, let it pin triton/xformers; never bump piecemeal.
+
+## 2026-06-21 — D22: DPO v2 (length-balanced) — clean win, hack fixed → Writer LOCKED = dpo-v2
+
+**DPO v2 (length-penalized best-of-N, 1,398 pairs, λ=0.005, 2 ep) vs SFT, judged by locked v6 (n=60):**
+overall win-rate **0.75** (v2 +1.51 vs SFT +0.48); ideate 0.75, improve 0.75. **Length audit: 112 vs 123 chars**
+— the v1 hack (175 vs 121, +45%) is GONE; v2 is even slightly terser than SFT.
+
+Neutralizing length in best-of-N selection both KILLED the reward-hack AND raised the win-rate (0.67→0.75):
+removing the length shortcut forced DPO to learn genuine quality, which generalizes better. v2 train acc 0.64
+(< v1's 0.76) is the *expected* sign of a harder, shortcut-free task (cf. the v6 scorer). Qualitatively v2 is
+terser, more aphoristic, tpot-voiced ("It seems that most people are only capable of a few emotions").
+
+**Residual (inherited v6 blind spots, NOT DPO failures):** the scorer still occasionally rewards a
+platitude-with-emoji ("...- Albert Einstein 🧠 #mindblown", +1.91) and once mis-ranked a good Matrix/Plato take
+low — the D17 limits (aphorism≈platitude near the noise ceiling; fooled by some content). DPO faithfully
+optimizes v6 so it inherits these; mitigable later via a stronger scorer / judge-time filters, and the GRPO
+reward's bait penalty (§3).
+
+**Writer LOCKED = DPO v2** (`outputs/writer/qwen3b-dpo-v2`, alias `qwen3b-writer-LOCKED`). Progression
+base → SFT (0.67 vs base) → DPO v2 (0.75 vs SFT). Phase 4a DONE. Next: 4b GRPO (on-policy push) + Phase 5 CLI.
 
 ## 2026-06-21 — D21: DPO v1 improves the reward but LENGTH-HACKS — best-of-N length penalty → v2
 

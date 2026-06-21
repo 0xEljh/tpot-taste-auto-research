@@ -57,6 +57,8 @@ def main(
         bnb_4bit_compute_dtype=torch.bfloat16, bnb_4bit_use_double_quant=True,
     )
     model = AutoModelForCausalLM.from_pretrained(base, quantization_config=bnb, dtype=torch.bfloat16)
+    if not hasattr(model, "warnings_issued"):
+        model.warnings_issued = {}  # TRL 0.24 expects it; transformers 5.5 dropped it (cf. D20)
     model = PeftModel.from_pretrained(model, str(sft_adapter), is_trainable=True)  # continue from SFT
     model.config.use_cache = False
 
