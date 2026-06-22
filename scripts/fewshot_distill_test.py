@@ -26,6 +26,7 @@ def main(
     pool: Path = Path("data/splits/taste_v7_pool_scored.parquet"),
     out_pairs: Path = Path("data/splits/taste_fs_deopt_train_pairs.parquet"),
     out_heldout: Path = Path("outputs/fs_heldout_ids.json"),
+    heldout_in: Path = Path("outputs/align_heldout_ids.json"),  # shared A-vs-B eval set (exemplars excluded from it)
     n_shot: int = 8,        # per class -> 16 exemplars; the rest are held-out for eval
     n_pool: int = 1500,
     n_styles: int = 2,
@@ -42,13 +43,17 @@ def main(
 
     lab = {int(k): _MAP[v] for k, v in json.loads(labels.read_text()).items() if v in _MAP}
     crows = [r for r in pl.read_parquet(calib).to_dicts() if r["id"] in lab]
-    tpot = [(r["id"], r["text"]) for r in crows if lab[r["id"]] == 1.0]
-    nott = [(r["id"], r["text"]) for r in crows if lab[r["id"]] == 0.0]
+    # shared held-out (the A-vs-B eval set): exemplars MUST come from the train remainder only, so neither
+    # approach trains on the items it's later scored against.
+    held_ids = set(json.loads(heldout_in.read_text())) if heldout_in and heldout_in.exists() else set()
+    tpot = [(r["id"], r["text"]) for r in crows if lab[r["id"]] == 1.0 and r["id"] not in held_ids]
+    nott = [(r["id"], r["text"]) for r in crows if lab[r["id"]] == 0.0 and r["id"] not in held_ids]
     exemplars = [(t, 9.0) for _, t in tpot[:n_shot]] + [(t, 1.0) for _, t in nott[:n_shot]]
-    held = [r["id"] for r in crows if r["id"] not in {i for i, _ in (tpot[:n_shot] + nott[:n_shot])}]
+    held = sorted(held_ids) if held_ids else \
+        [r["id"] for r in crows if r["id"] not in {i for i, _ in (tpot[:n_shot] + nott[:n_shot])}]
     out_heldout.parent.mkdir(parents=True, exist_ok=True)
     out_heldout.write_text(json.dumps(held))
-    print(f"[exemplars] {len(exemplars)} ({n_shot}+{n_shot})  held-out eval ids: {len(held)}")
+    print(f"[exemplars] {len(exemplars)} ({n_shot}+{n_shot}) from train  held-out eval ids: {len(held)}")
 
     rng = random.Random(seed)
     pdf = pl.read_parquet(pool).to_dicts()

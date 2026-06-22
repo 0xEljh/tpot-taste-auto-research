@@ -46,9 +46,13 @@ def main(
     dec = human != 0.5
     thr = np.percentile(s, 100 * (1 - (human == 1.0).mean()))  # top-k by human tpot rate
     prec = ((human[dec] == 1.0) & (s[dec] >= thr)).sum() / max(1, (s[dec] >= thr).sum())
+    # pairwise accuracy on tpot-vs-not held-out pairs — the highest-power metric at small N (random=0.5)
+    hi, lo = s[human == 1.0], s[human == 0.0]
+    pw = np.mean([(1.0 if h > l else 0.5 if h == l else 0.0) for h in hi for l in lo]) if len(hi) and len(lo) else float("nan")
     print(f"[{scorer.name}] on {len(rows)} human-labeled items "
           f"({int((human==1).sum())} tpot / {int((human==0).sum())} not / {int((human==0.5).sum())} borderline)")
-    print(f"  Spearman(scorer, human) = {spearman(s, human):+.3f}   precision@taste-rate = {prec:.2f}")
+    print(f"  Spearman(scorer, human) = {spearman(s, human):+.3f}   "
+          f"pairwise-acc(tpot>not) = {pw:.2f} over {len(hi)*len(lo)} pairs   precision@taste-rate = {prec:.2f}")
 
 
 if __name__ == "__main__":
