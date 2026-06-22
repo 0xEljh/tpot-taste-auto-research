@@ -7,11 +7,14 @@ Companion to `01-system-design.md` (the full design).
 
 ## STATUS (living)
 
-**Phase:** 6 essentially DONE — **the platitude pollution is fixed at the scorer level.** Scorer **LOCKED = v7.1**
-(judge-anchored deopt, D33); Writer stays DPO-v2 (propagation was a wash — the bug was the scorer, not the writer,
-D35). **Root cause settled:** the engagement proxy was *adversarial* to taste; eliciting taste from the base model
-(judge) and distilling it (v7.1) was the fix. **Open for user:** human-calibrate the judge, taste pluralism,
-v7.2 corporate residual, adopt dpo-v2sft? **Last updated:** 2026-06-21.
+**Phase:** 6f DONE — **the scorer is now aligned with the *human's* taste.** Scorer **LOCKED = v7.2-human**
+(direct human-pair BT, D40/D41): held-out pairwise **0.50→0.72** vs the user's 137 labels, where v7.1 (rubric-distilled)
+was at chance. Writer stays DPO-v2 (the scorer is the taste lever; best-of-N propagates it, D35). **The arc:**
+engagement ⟂ taste (adversarial) → a base-model judge elicits *coarse* taste → v7.1 fixes platitudes but is CHANCE
+on the human's *fine* taste → **direct human labels** (the only lever that scales, D40) crack it. Judge-distillation
+(A) self-defeated (aligned judge endorses nothing) and hybrid (C') went anti-aligned — the judge lineage's taste is
+*opposed* to the human's (D41). **Open for user:** review the v7.2 dipstick (Notion); round-3 labels to push further;
+taste pluralism. **Last updated:** 2026-06-22.
 
 - [x] Phase 6a: goods audit (`audit_goods.py`, D28) — pollution real but subtle; naive heuristic filter rejected.
 - [x] Phase 6b: demonstrative dipstick (`demo_eval.py` + `eval/demo_panel.py`) → Notion (D28); proved v6's flaw
@@ -21,6 +24,10 @@ v7.2 corporate residual, adopt dpo-v2sft? **Last updated:** 2026-06-21.
       below tpot, held-out 0.54→0.62, OOD fixed. **Scorer LOCKED v6→v7.1.**
 - [x] Phase 6d: propagate to Writer (curate goods via v7.1 → re-SFT → re-DPO, D34) — **judge A/B = TIE (0.43)**;
       the platitude problem was a scorer problem, not a writer one (D35). Writer stays DPO-v2.
+- [x] Phase 6e: human-calibrate the judge (D36–D39) — v7.1 only weakly aligned to the USER (Spearman 0.13);
+      rubric edits + 7B judge don't steer; few-shot human exemplars the only lever; label-gated on round-2.
+- [x] Phase 6f: round-2 labels (137 total) → few-shot judge **0.42** → **direct human-pair scorer v7.2** (D40/D41):
+      held-out pairwise **0.50→0.72**; A (few-shot-distill) self-defeating, C' (hybrid) anti-aligned. **LOCKED v7.1→v7.2.**
 
 - [x] Recon: env, GPU, data, stack (4 parallel research agents).
 - [x] Scaffold: `flake.nix`, `pyproject.toml` (pinned), dirs, `.env` (W&B), docs.
@@ -136,6 +143,80 @@ accelerate==1.13.0, bitsandbytes==0.49.2, datasets==4.3.0, numpy==2.2.6`.
 **Why.** Exactly the versions in `negative-space-learning-v2/uv.lock`, already in the uv cache → fast,
 first-try-clean resolve. vLLM and sentence-transformers kept in separate extras so they can't perturb the
 proven set. Per the compat research: pick torch first, let it pin triton/xformers; never bump piecemeal.
+
+## 2026-06-22 — D41: Scorer LOCKED v7.1 → v7.2-human — direct human pairs win; hybrid breadth is anti-aligned
+
+Resolves D40's open caveat (v72-human's synthetic-text compression) and picks the lock.
+
+**The hybrid is destructive, not additive.** C' = human pairs (×2) + v7.1 deopt pairs (5,317), ~50/50, trained
+`v72hybrid`. Result on the shared 46 held-out: Spearman **−0.192**, pairwise **0.39**, panel gap **−0.55
+(inverted)** — *worse than chance and worse than v7.1*. The reason is fundamental: **v7.1's "coarse taste" is
+partially OPPOSED to the human's.** The rubric/v71 lineage rewards substance/vividness/profundity (it scored the
+human's meta-jokes 0 and niche-trivia 9, D40); the human rewards authentic voice and rejects exactly that. The two
+pair-sets give contradictory gradients → the model learns something pathological. **There is no free breadth from
+the judge lineage** — it is contaminated with anti-aligned taste. (This also retro-explains why v7→v7.1 needed
+*deopt* and never reached fine alignment: its whole signal is the wrong axis.)
+
+**v72-human handles generated text fine — the panel collapse was an OOD red herring.** Full dipstick
+(`demo_eval.py --scorer v72human`, pushed to Notion for review). The decisive section is writer best-of-N on
+*generated* drafts (in-distribution tweet-like text, unlike the adversarial hand-authored panel):
+- platitude-trap draft `"work hard and you will succeed"` → v72-human ranks the subversive rewrite (+0.81) **above**
+  the straight platitudes (−0.67, −0.84) — it de-platitudes.
+- platitude-bait topic `discipline` → whole topic kept low (max +0.98), picks the most specific take, no
+  motivational drift. `your desk` → all negative. `debugging at 2am` → picks "it's not a bug, it's a feature".
+- real goods: bottom-8 = promo / news / shoutout / NFT (correct); top = genuine-curious takes.
+
+**Decision: Scorer LOCKED = v7.2-human** (`qwen3b-bt-v72human`; symlink `qwen3b-bt-taste-LOCKED` repointed
+v7.1→v7.2; v7.1 = `qwen3b-bt-v71-judge-deopt` preserved). It is the first scorer correlated with the *human's* fine
+taste (held-out pairwise **0.50→0.72**, Spearman **0.03→0.39**) AND it ranks generated drafts correctly. Writer
+stays DPO-v2 (the scorer is the taste lever; best-of-N propagates the fix, D35).
+
+**Residuals (non-blocking, future levers):** (1) mild platitude residual on *synthetic* generic-viral probes — not
+seen on real writer output; (2) over-rates non-English in raw goods (OOD; the curation English filter,
+`_english()` in `build_taste_pairs.py`, already handles it). The one *aligned* breadth source if we ever want it:
+**human-tpot-anchored deopt** (degrade the human's own confirmed-tpot into generic — agrees with the signal, unlike
+v71). Deferred (YAGNI — B already works on generated text). Bigger lever remains **more human labels** (round-3).
+
+## 2026-06-22 — D40: The alignment CRACK — 137 labels → few-shot judge 0.42 → train DIRECTLY on human pairs
+
+Round-2 labels landed (`pull_calibration_labels.py` → **137 total**: 35 tpot / 42 borderline / 60 not), 2.3× D39's
+60. Everything D38 predicted, plus a pivot.
+
+**1. The few-shot judge scales exactly as predicted.** `judge_fewshot_test.py --n-shot 10` (20 exemplars, 117
+held-out): rubric-only **0.091** (chance), few-shot **0.424**. The lever held and steepened (0.23@12-shot/60 →
+**0.42**@20-shot/137). The human's taste *is* capturable — only in-context, never via rules.
+
+**2. The rubric judge's errors are SYSTEMATIC, not noise** (rubric judge vs human, all 137: Spearman 0.165; class
+means tpot 4.63 ≈ bord 4.64 ≳ not 3.85 — barely ordered). It scores "many people do not realize this but this is
+actually true" → **0** (reads the meta-joke literally as content-free), "why 'degrees of freedom' are needed" → 0,
+"god this is fascinating" → 0; and rates niche Transformers trivia **9**, purple prose 8, a profound slavery quote
+10 — all human-NOT. **The base prior rewards surface markers of "good writing" (substance, vividness, profundity);
+the human rewards authentic voice (deadpan, genuine delight, self-aware wit) and rejects performance.** That axis is
+contrastive — it lives in examples, which is why every rubric edit (D37) failed.
+
+**3. The pivot — skip the judge, supervise on the human directly (Approach B).** Distillation is two lossy hops
+(judge→pairs→scorer). The labels are length-balanced (len↔label r=−0.036), so the v7 register confound that forced
+deopt does NOT apply — cross-class human pairs carry pure taste. `human_pairs.py` (+7 TDD tests) →
+`build_human_pairs.py`: a fixed stratified **46-item held-out** (shared, fair eval) + **2,684 BT pairs** from the
+91 train labels (tpot>borderline>not). Trained `v72-human` (epochs 2).
+
+**Result (shared 46 held-out; new `pairwise-acc(tpot>not)` metric — high-power at small N):**
+| scorer | Spearman | pairwise-acc | precision |
+|---|---|---|---|
+| v7.1 (rubric-distilled, LOCKED) | +0.029 | **0.50 (chance)** | 0.44 |
+| **v72-human (direct pairs)** | **+0.392** | **0.72** | **0.71** |
+
+v7.1 is at literal chance on the human's *fine* taste; direct human-pairs generalize to unseen items at 0.72,
+near the few-shot judge's own 0.42 ceiling — but as a fast scalar scorer, no prompts.
+
+**4. Approach A (few-shot-distill) is SELF-DEFEATING.** `fewshot_distill_test.py --n-pool 2000`: the now-aligned
+few-shot judge scored **0 of 2000** pool items ≥7 — it absorbed the human's high bar so well that nothing generic
+clears it → 0 anchors → 0 deopt pairs → junk scorer (0.005). **The better the judge aligns, the fewer items it
+endorses, starving judge-anchored distillation.** Direct supervision (B) sidesteps this entirely.
+
+**Open caveat → D41.** v72-human collapses on the synthetic archetype panel (HIGH−LOW gap 2.59→0.28): trained on
+91 *real* tweets, it's OOD/compressed on hand-authored/generated text — a risk for writer best-of-N. Hybrid
+(human pairs + v7.1 deopt pairs for breadth) + a writer-best-of-N dipstick decide the v7.2 lock in D41.
 
 ## 2026-06-21 — D39: Linchpin dry-run — does few-shot alignment survive distillation? (inconclusive, label-gated)
 

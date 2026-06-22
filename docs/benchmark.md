@@ -6,7 +6,7 @@ QLoRA adapters on one 12 GB RTX 3080 Ti.
 
 | Capability | Deliverable | Model |
 |---|---|---|
-| Judge if a post is worth posting | #2 | **Scorer** = Qwen2.5-3B + BT reward head (**v7.1**) |
+| Judge if a post is worth posting | #2 | **Scorer** = Qwen2.5-3B + BT reward head (**v7.2-human**, taste-aligned) |
 | Recommend post ideas | #1 | **Writer** = Qwen2.5-3B SFT→DPO (v2) |
 | Suggest improvements | #3 | Writer (best-of-N) + Scorer (ranks) |
 
@@ -42,7 +42,27 @@ still mildly over-rated (v7.2 lever). **Scorer LOCKED v6 → v7.1** (`qwen3b-bt-
    **the platitude problem was a *scorer* problem, not a *writer* one** — fixing the scorer fixed the system via
    best-of-N; the writer was already adequate. **Writer stays DPO-v2.**
 
-> The v6-era scorecard below is retained as history; the locked scorer is now v7.1.
+## Phase 6f (2026-06-22): the human-alignment crack — Scorer v7.1 → v7.2-human
+
+v7.1 fixed the *coarse* platitude problem, but calibration against the user's own labels (D36) revealed it was at
+**chance on the user's *fine* taste**. With 137 labels (round-1 + round-2), this resolved — by abandoning the judge:
+
+1. **The few-shot judge scaled** (rubric-only 0.09 → 20-shot **0.42** vs the user's held-out taste), but **judge-
+   distillation is a dead end**: Approach A (few-shot-distill) self-defeated (the aligned judge endorsed 0/2000 pool
+   items → no anchors); Approach C (hybrid w/ v7.1 pairs) went **anti-aligned** (−0.19) — the judge lineage's taste
+   is partially *opposed* to the user's (it rewards substance/profundity; the user rewards authentic voice).
+2. **Approach B — train the BT scorer DIRECTLY on the user's labels as pairs — wins.** The labels are length-balanced
+   (no register confound), so cross-class pairs (tpot>borderline>not) carry pure taste.
+
+| shared 46 held-out | v7.1 (rubric-distilled) | **v7.2-human (direct pairs)** |
+|---|---|---|
+| Spearman ↔ human | +0.03 | **+0.39** |
+| pairwise-acc(tpot>not) | 0.50 (chance) | **0.72** |
+
+And v7.2 ranks *generated* drafts correctly (de-platitudes the writer best-of-N traps). **Scorer LOCKED v7.1 → v7.2**
+(`qwen3b-bt-v72human`). Dipstick pushed to Notion for review. Full story: `docs/design/04-taste-alignment.md` (D40/D41).
+
+> The v6/v7.1-era scorecards below are retained as history; the locked scorer is now **v7.2-human**.
 
 ## Taste Scorer (v6, historical) — superseded by v7.1
 
@@ -109,16 +129,16 @@ Smoke example — `improve "lit a fake cig"` (draft −0.17) → ranked improvem
 
 ## Next
 
-The v6 ceiling (D27) was broken by the better Scorer it called for: **v7.1** (judge-anchored, D33) fixes the
-platitude blind spot. The frontier is now elsewhere:
+The platitude blind spot (v6) → fixed by v7.1. v7.1's chance-level alignment with the *user's* taste → fixed by
+**v7.2-human** (direct human pairs, D40/D41). The frontier is now:
 
-1. **Human-calibrate the judge** (the one thing we can't bootstrap) — the judge's taste = base-model prior ×
-   *our* rubric, graded on *our* archetypes. A few hundred human labels (on the judge/v6 disagreements) would
-   turn "eyeballed correct" into a *measured* judge accuracy and tune the rubric to the real target.
-2. **v7.2 — the corporate-listicle residual** (the one panel category v7.1 still mildly over-rates): up-weight
-   corporate/listicle degradations.
-3. **Taste pluralism** — is "tpot taste" one axis or several (rationalist / post-rat / e-acc / builder /
-   shitposter)? Possibly a conditional scorer.
-4. **GRPO redux vs v7.1** — re-running the RL push against a scorer that no longer rewards platitudes (the D27
-   drift was v6's fault) may now yield a genuine gain, not metric-gaming.
-5. **Adopt `dpo-v2sft`?** — the clean-data-foundation writer (tie on evidence; cleaner on principle).
+1. **More human labels (round-3)** — the proven, only-scaling lever. 137 labels → 0.72 pairwise; the magnitude is
+   label-limited (46-item held-out). Round-3 (review the v7.2 dipstick → relabel disagreements) pushes alignment
+   past ~0.4 Spearman, and de-noises the still-provisional numbers.
+2. **Re-curate goods + writer best-of-N via v7.2** — v7.2 is now the taste-aligned ranker; re-running curation
+   (with the English filter) and the writer dipstick against it should sharpen ideate/improve toward the user's voice.
+3. **Taste pluralism** — now *more* tractable: direct-pair training per-style needs only per-style labels (no judge).
+4. **(Optional) human-tpot-anchored deopt** — the one *aligned* breadth source if synthetic-text robustness ever
+   matters (degrade the user's own confirmed-tpot; agrees with the signal, unlike the v71 lineage). YAGNI for now.
+5. **GRPO redux vs v7.2** — RL was shelved against the misaligned v7.1; a now-aligned reward makes it worth revisiting
+   (still watch for reward-gaming).
