@@ -236,6 +236,17 @@ answers the original question: we have pushed hard enough on the *model*; the mo
 5. **Pull + merge** (`pull_calibration_labels.py` → `calibration_labels.json`), rebuild pairs/targets, **retrain the
    bake-off winner**, re-measure on a (now larger) held-out. Repeat.
 
+### Round-3 batch — pushed 2026-06-22 (ids 141–180)
+
+40 candidates via `build_round3_candidates.py` (20 boundary / 10 committee-disagree / 10 random control), deduped vs
+ids 1–140, pushed by `push_round3_to_notion.py` with my first-pass proposal + confidence + reason in each page's body
+callout and the **Taste select left empty** — verified contamination-safe (re-pull: 137 labeled / 40 blank). The
+disagree bucket surfaced v7.2's residual blind spot: genuine-delight / absurdist tweets it scores −2 to −4 (#145
+"concrete jungle wet dream tomato", #152 deadpan Louisiana-Purchase, #153 verb→noun "buttplug") that read as on-taste,
+so those labels should be especially corrective. Close the loop after verification: `pull_calibration_labels.py` →
+`build_human_pairs.py` → `train_scorer.py` → `eval_scorer_vs_human.py`, then re-run `bakeoff_scorer.py` to see whether
+more labels lift the 0.67 ceiling or finally separate the arms.
+
 ---
 
 ## References
