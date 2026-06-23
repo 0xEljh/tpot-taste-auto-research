@@ -12,6 +12,7 @@ import numpy as np
 
 from tpot_taste.scoring.bakeoff import (
     LABEL_MAP,
+    assemble_oof,
     cv_fold_indices,
     human_eval,
     load_labels,
@@ -106,3 +107,21 @@ def test_cv_fold_indices_is_stratified_and_seeded():
         assert classes == {1.0, 0.5, 0.0}             # all three present in each test fold
     again = cv_fold_indices(y, n_splits=5, seed=0)
     assert all((a[1] == b[1]).all() for a, b in zip(folds, again))  # deterministic
+
+
+def test_assemble_oof_places_each_fold_score_at_its_global_index():
+    # Subprocess-per-fold CV (heavy bases that OOM an in-process loop) dumps one
+    # {idx, score} json per fold; assemble_oof glues them back to a single length-n
+    # out-of-fold vector aligned to all_pw order.
+    folds = [{"idx": [0, 2, 4], "score": [0.1, 0.2, 0.3]},
+             {"idx": [1, 3], "score": [0.4, 0.5]}]
+    oof = assemble_oof(folds, 5)
+    assert list(oof) == [0.1, 0.4, 0.2, 0.5, 0.3]
+
+
+def test_assemble_oof_leaves_missing_indices_nan_for_partial_runs():
+    # A crashed/partial run must read as partial (NaN), never silently wrong: aggregation
+    # over the survivors then reports n<N rather than fabricating scores for missing folds.
+    oof = assemble_oof([{"idx": [0, 1], "score": [0.7, 0.8]}], 4)
+    assert oof[0] == 0.7 and oof[1] == 0.8
+    assert np.isnan(oof[2]) and np.isnan(oof[3])

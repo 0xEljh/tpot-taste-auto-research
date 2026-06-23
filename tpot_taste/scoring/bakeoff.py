@@ -77,3 +77,19 @@ def cv_fold_indices(targets, n_splits: int = 5, seed: int = 0):
     strat = np.rint(y * 2).astype(int)  # {0.0,0.5,1.0} -> {0,1,2}
     skf = StratifiedKFold(n_splits=n_splits, shuffle=True, random_state=seed)
     return [(tr, te) for tr, te in skf.split(np.zeros(len(y)), strat)]
+
+
+def assemble_oof(fold_results, n: int):
+    """Glue per-fold out-of-fold predictions back into ONE length-n score vector.
+
+    For heavy bases (8B) the in-process CV loop OOMs across reloads, so each fold runs in its
+    own process and dumps {"idx": [...], "score": [...]} (test-fold global indices + scores).
+    `assemble_oof` scatters those back into all_pw order. Indices never written stay NaN — a
+    crashed/partial run then reads as partial (aggregate over non-NaN, report n<N) instead of
+    silently fabricating a score. cv_fold_indices guarantees a full run covers every index once.
+    """
+    oof = np.full(int(n), np.nan)
+    for fr in fold_results:
+        idx = np.asarray(fr["idx"], dtype=int)
+        oof[idx] = np.asarray(fr["score"], dtype=float)
+    return oof

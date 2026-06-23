@@ -49,6 +49,8 @@ def main(
     smoke: bool = False,
     cv: bool = False,
     folds: int = 5,
+    fold: int = -1,
+    cv_aggregate: bool = False,
     scheduler: str = "linear",
 ) -> None:
     import polars as pl
@@ -71,7 +73,11 @@ def main(
     elif arm == "modernbert":
         _modernbert(train_pw, held_pw, out, epochs, lr, seed, smoke)
     elif arm == "seqcls":
-        if cv:
+        if cv_aggregate:
+            _cv_aggregate(all_pw, base, out, folds)
+        elif cv and fold >= 0:
+            _seqcls_cv_fold(all_pw, base, out, epochs, lr, seed, smoke, bs, folds, fold, scheduler)
+        elif cv:
             _seqcls_cv(all_pw, base, out, epochs, lr, seed, smoke, bs, folds, scheduler)
         else:
             _seqcls(train_pw, held_pw, base, out, epochs, lr, seed, smoke, bs, scheduler)
@@ -114,9 +120,15 @@ def _embed_mlp(train_pw, held_pw, all_pw, embedder: str, head: str, seed: int) -
 
 
 def _train_seqcls_regression(model, tok, train_pw, *, epochs, lr, batch_size, out,
-                             smoke, grad_ckpt=True, max_length=256, scheduler="linear"):
+                             smoke, grad_ckpt=True, max_length=256, scheduler="linear",
+                             needs_token_type_ids=False):
     """Fine-tune any AutoModelForSequenceClassification(num_labels=1) as an MSE regressor on
-    pointwise (text, target in {0,0.5,1}) rows. num_labels=1 + float labels => HF uses MSELoss."""
+    pointwise (text, target in {0,0.5,1}) rows. num_labels=1 + float labels => HF uses MSELoss.
+
+    needs_token_type_ids: Gemma3's mask builder raises during training if token_type_ids is None
+    (token_type==1 marks image tokens; text-only => all zeros). It's gated on self.training, so
+    eval/score_texts is exempt — only the train collator must supply the zeros."""
+    import torch
     from datasets import Dataset
     from transformers import DataCollatorWithPadding, Trainer, TrainingArguments
 
@@ -124,6 +136,15 @@ def _train_seqcls_regression(model, tok, train_pw, *, epochs, lr, batch_size, ou
                             "labels": [float(y) for *_, y in train_pw]})
     ds = ds.map(lambda ex: tok(ex["text"], truncation=True, max_length=max_length), batched=True)
     ds = ds.remove_columns(["text"])
+    data_collator = DataCollatorWithPadding(tok)
+    if needs_token_type_ids:
+        _pad = DataCollatorWithPadding(tok)
+
+        def data_collator(features):  # noqa: F811 — Gemma3 text-only: all-zero token_type_ids
+            batch = _pad(features)
+            batch["token_type_ids"] = torch.zeros_like(batch["input_ids"])
+            return batch
+
     args = TrainingArguments(
         output_dir=str(out), per_device_train_batch_size=batch_size, gradient_accumulation_steps=1,
         num_train_epochs=(1 if smoke else epochs), max_steps=(4 if smoke else -1),
@@ -133,7 +154,7 @@ def _train_seqcls_regression(model, tok, train_pw, *, epochs, lr, batch_size, ou
         logging_steps=5, save_strategy="no", report_to=[], dataloader_num_workers=2,
     )
     Trainer(model=model, args=args, train_dataset=ds,
-            data_collator=DataCollatorWithPadding(tok), processing_class=tok).train()
+            data_collator=data_collator, processing_class=tok).train()
     model.eval()
     return model
 
@@ -184,8 +205,40 @@ def _seqcls(train_pw, held_pw, base, out, epochs, lr, seed, smoke, batch_size=4,
         task_type=TaskType.SEQ_CLS, target_modules="all-linear"))
     model.config.pad_token_id = tok.pad_token_id
     _train_seqcls_regression(model, tok, train_pw, epochs=epochs, lr=lr, batch_size=batch_size,
-                             out=out, smoke=smoke, grad_ckpt=True, scheduler=scheduler)
+                             out=out, smoke=smoke, grad_ckpt=True, scheduler=scheduler,
+                             needs_token_type_ids="gemma" in base.lower())
     _eval_seqcls(model, tok, held_pw, f"seqcls:{base.split('/')[-1]}" + ("/smoke" if smoke else ""))
+
+
+def _train_and_score_fold(all_pw, base, out_fold, tr, te, *, epochs, lr, batch_size,
+                          smoke, scheduler, needs_tti):
+    """Train a fresh 4-bit LoRA regressor on `tr`, score `te`, free the GPU, return the scores.
+
+    Self-contained (loads + frees its own model) so it works identically whether called in a
+    loop (small bases) or as the entire body of a per-fold subprocess (heavy bases that OOM
+    an in-process loop). Returns a numpy score array aligned to `te`."""
+    import gc
+
+    import torch
+    from peft import LoraConfig, TaskType, get_peft_model, prepare_model_for_kbit_training
+
+    from tpot_taste.scoring.model import load_reward_model, score_texts
+
+    texts = [t for _, t, _ in all_pw]
+    model, tok = load_reward_model(base, four_bit=True)
+    model = prepare_model_for_kbit_training(model, use_gradient_checkpointing=True)
+    model = get_peft_model(model, LoraConfig(
+        r=16, lora_alpha=32, lora_dropout=0.05, bias="none",
+        task_type=TaskType.SEQ_CLS, target_modules="all-linear"))
+    model.config.pad_token_id = tok.pad_token_id
+    _train_seqcls_regression(model, tok, [all_pw[i] for i in tr], epochs=epochs, lr=lr,
+                             batch_size=batch_size, out=out_fold, smoke=smoke, grad_ckpt=True,
+                             scheduler=scheduler, needs_token_type_ids=needs_tti)
+    s = score_texts(model, tok, [texts[i] for i in te], batch_size=16)
+    del model
+    gc.collect()
+    torch.cuda.empty_cache()
+    return s
 
 
 def _seqcls_cv(all_pw, base, out, epochs, lr, seed, smoke, batch_size, folds, scheduler="linear") -> None:
@@ -193,39 +246,70 @@ def _seqcls_cv(all_pw, base, out, epochs, lr, seed, smoke, batch_size, folds, sc
     regressor over ALL labeled items. A fresh 4-bit LoRA model is trained per fold on the
     K-1 training folds and scores the held fold; out-of-fold predictions are aggregated into
     ONE human_eval over all N (n=46 single-split is ±0.07; CV over 177 is the robust read).
-    Frees the model between folds to stay inside 12 GB across the 5 reloads."""
-    import gc
-
+    In-process loop — fine for <=4B; use --fold/--cv-aggregate for 8B (see _seqcls_cv_fold)."""
     import numpy as np
-    import torch
-    from peft import LoraConfig, TaskType, get_peft_model, prepare_model_for_kbit_training
 
     from tpot_taste.scoring.bakeoff import cv_fold_indices, human_eval
-    from tpot_taste.scoring.model import load_reward_model, score_texts
 
-    texts = [t for _, t, _ in all_pw]
+    needs_tti = "gemma" in base.lower()
     y = np.array([v for *_, v in all_pw], dtype=float)
     oof = np.full(len(y), np.nan)
     splits = cv_fold_indices(y, n_splits=folds, seed=seed)
     for k, (tr, te) in enumerate(splits):
-        model, tok = load_reward_model(base, four_bit=True)
-        model = prepare_model_for_kbit_training(model, use_gradient_checkpointing=True)
-        model = get_peft_model(model, LoraConfig(
-            r=16, lora_alpha=32, lora_dropout=0.05, bias="none",
-            task_type=TaskType.SEQ_CLS, target_modules="all-linear"))
-        model.config.pad_token_id = tok.pad_token_id
-        _train_seqcls_regression(model, tok, [all_pw[i] for i in tr], epochs=epochs, lr=lr,
-                                 batch_size=batch_size, out=f"{out}/fold{k}", smoke=smoke,
-                                 grad_ckpt=True, scheduler=scheduler)
-        s = score_texts(model, tok, [texts[i] for i in te], batch_size=16)
+        s = _train_and_score_fold(all_pw, base, f"{out}/fold{k}", tr, te, epochs=epochs, lr=lr,
+                                  batch_size=batch_size, smoke=smoke, scheduler=scheduler, needs_tti=needs_tti)
         oof[te] = s
         fe = human_eval(s, y[te])
         print(f"  [cv fold {k + 1}/{len(splits)}] n={len(te)} pw={fe['pairwise']:.2f} rho={fe['spearman']:+.2f}")
-        del model
-        gc.collect()
-        torch.cuda.empty_cache()
     cv = human_eval(oof, y)
     print(f"  [seqcls-cv:{base.split('/')[-1]}] {len(splits)}-fold CV(n={len(y)}): "
+          f"pw={cv['pairwise']:.2f} rho={cv['spearman']:+.2f} prec={cv['precision']:.2f} "
+          f"({cv['n_tpot']}tpot/{cv['n_not']}not)")
+
+
+def _seqcls_cv_fold(all_pw, base, out, epochs, lr, seed, smoke, batch_size, folds, fold,
+                    scheduler="linear") -> None:
+    """Run ONE CV fold and dump its out-of-fold predictions to {out}/fold{fold}_oof.json.
+
+    For heavy bases (8B) the in-process 5-reload loop leaks GPU memory and OOMs mid-run; running
+    each fold as its own process lets the OS reclaim everything between folds. Splits are
+    recomputed from the same (seed, data) so every fold-process sees the identical partition."""
+    import json as _json
+
+    import numpy as np
+
+    from tpot_taste.scoring.bakeoff import cv_fold_indices, human_eval
+
+    needs_tti = "gemma" in base.lower()
+    y = np.array([v for *_, v in all_pw], dtype=float)
+    splits = cv_fold_indices(y, n_splits=folds, seed=seed)
+    tr, te = splits[fold]
+    s = _train_and_score_fold(all_pw, base, f"{out}/fold{fold}", tr, te, epochs=epochs, lr=lr,
+                              batch_size=batch_size, smoke=smoke, scheduler=scheduler, needs_tti=needs_tti)
+    fe = human_eval(s, y[te])
+    print(f"  [cv fold {fold + 1}/{len(splits)}] n={len(te)} pw={fe['pairwise']:.2f} rho={fe['spearman']:+.2f}")
+    Path(out).mkdir(parents=True, exist_ok=True)
+    (Path(out) / f"fold{fold}_oof.json").write_text(_json.dumps(
+        {"idx": [int(i) for i in te], "score": [float(x) for x in s],
+         "target": [float(y[i]) for i in te]}))
+
+
+def _cv_aggregate(all_pw, base, out, folds) -> None:
+    """Glue the per-fold *_oof.json dumps into one OOF metric (the subprocess-CV counterpart of
+    the in-process summary line). Reports n<N if some folds are missing rather than fabricating."""
+    import json as _json
+
+    import numpy as np
+
+    from tpot_taste.scoring.bakeoff import assemble_oof, human_eval
+
+    y = np.array([v for *_, v in all_pw], dtype=float)
+    fold_files = sorted(Path(out).glob("fold*_oof.json"))
+    fold_data = [_json.loads(f.read_text()) for f in fold_files]
+    oof = assemble_oof(fold_data, len(y))
+    mask = ~np.isnan(oof)
+    cv = human_eval(oof[mask], y[mask])
+    print(f"  [seqcls-cv:{base.split('/')[-1]}] {len(fold_data)} folds, CV(n={int(mask.sum())}/{len(y)}): "
           f"pw={cv['pairwise']:.2f} rho={cv['spearman']:+.2f} prec={cv['precision']:.2f} "
           f"({cv['n_tpot']}tpot/{cv['n_not']}not)")
 
