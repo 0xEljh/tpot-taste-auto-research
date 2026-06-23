@@ -52,6 +52,7 @@ def main(
     fold: int = -1,
     cv_aggregate: bool = False,
     scheduler: str = "linear",
+    save_adapter: bool = False,
 ) -> None:
     import polars as pl
 
@@ -80,7 +81,7 @@ def main(
         elif cv:
             _seqcls_cv(all_pw, base, out, epochs, lr, seed, smoke, bs, folds, scheduler)
         else:
-            _seqcls(train_pw, held_pw, base, out, epochs, lr, seed, smoke, bs, scheduler)
+            _seqcls(train_pw, held_pw, base, out, epochs, lr, seed, smoke, bs, scheduler, save_adapter)
     else:
         raise SystemExit(f"unknown arm '{arm}'")
 
@@ -187,7 +188,8 @@ def _regress_3b(train_pw, held_pw, base, out, epochs, lr, seed, smoke) -> None:
     _eval_seqcls(model, tok, held_pw, "regress-3b" + ("/smoke" if smoke else ""))
 
 
-def _seqcls(train_pw, held_pw, base, out, epochs, lr, seed, smoke, batch_size=4, scheduler="linear") -> None:
+def _seqcls(train_pw, held_pw, base, out, epochs, lr, seed, smoke, batch_size=4, scheduler="linear",
+            save_adapter=False) -> None:
     """Generic frontier arm: load ANY HF model as a 4-bit AutoModelForSequenceClassification(num_labels=1)
     and LoRA-fine-tune it as a pointwise taste regressor. Covers the 4B/8B + Gemma bases AND the warm-start
     Skywork-Reward-V2 RMs — those already ship a trained num_labels=1 head, so load_reward_model loads a
@@ -207,6 +209,15 @@ def _seqcls(train_pw, held_pw, base, out, epochs, lr, seed, smoke, batch_size=4,
     _train_seqcls_regression(model, tok, train_pw, epochs=epochs, lr=lr, batch_size=batch_size,
                              out=out, smoke=smoke, grad_ckpt=True, scheduler=scheduler,
                              needs_token_type_ids="gemma" in base.lower())
+    if save_adapter and not smoke:
+        model.save_pretrained(str(out))
+        tok.save_pretrained(str(out))
+        (Path(out) / "train_meta.json").write_text(json.dumps(
+            {"base": base, "objective": "regression-pointwise", "scheduler": scheduler,
+             "n_train": len(train_pw), "epochs": epochs, "lr": lr, "batch_size": batch_size,
+             "lora_r": 16, "lora_alpha": 32, "target_modules": "all-linear", "max_length": 256},
+            indent=2))
+        print(f"[saved] adapter -> {out}")
     _eval_seqcls(model, tok, held_pw, f"seqcls:{base.split('/')[-1]}" + ("/smoke" if smoke else ""))
 
 

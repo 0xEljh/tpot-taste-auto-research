@@ -1,8 +1,9 @@
 """TasteEngine — the integration of the two locked models (Phase 5).
 
-Writer (DPO v2, CausalLM) generates; Scorer (v6, SequenceClassification) judges. ideate/improve
-do best-of-N: generate N candidates, rank by the Scorer, return the top. Both adapters load lazily
-on one shared 4-bit base each (so `score` doesn't pay for the Writer, and vice versa).
+Writer (DPO v2, CausalLM) generates; Scorer (SequenceClassification) judges. ideate/improve
+do best-of-N: generate N candidates, rank by the Scorer, return the top. Each adapter loads lazily
+on its OWN 4-bit base (resolve_scorer_base reads the scorer's recorded base, which may differ from
+the Writer's — e.g. an 8B scorer + 3B writer), so `score` doesn't pay for the Writer, and vice versa.
 
 Pure helpers (build_prompt, rank_topk) are unit-tested; the model paths are smoke-tested via the CLI.
 """
@@ -22,6 +23,23 @@ def build_prompt(kind: str, *, topic: str | None = None, draft: str | None = Non
             raise ValueError("improve needs a draft")
         return IMPROVE_PROMPTS[0].format(draft=draft.strip())
     raise ValueError(f"unknown kind: {kind}")
+
+
+def resolve_scorer_base(scorer_path: Path | str, fallback: str) -> str:
+    """The scorer's OWN base model id, read from its PEFT `adapter_config.json`.
+
+    The Scorer and Writer no longer necessarily share a base (e.g. a Qwen3-8B scorer alongside a
+    Qwen2.5-3B writer — see decision-log D43/§10). PEFT records the adapter's base, so the engine
+    loads each adapter on the base it was trained on instead of assuming the Writer's. Falls back
+    to `fallback` for legacy adapters that don't record one."""
+    import json
+
+    cfg = Path(scorer_path) / "adapter_config.json"
+    if cfg.exists():
+        base = json.loads(cfg.read_text()).get("base_model_name_or_path")
+        if base:
+            return base
+    return fallback
 
 
 def rank_topk(candidates: list[str], scores: list[float], k: int) -> list[tuple[str, float]]:
@@ -68,7 +86,8 @@ class TasteEngine:
     def _ensure_scorer(self):
         if self._s is None:
             from tpot_taste.scoring.model import load_trained_scorer
-            self._s, self._stok = load_trained_scorer(self.scorer_path, self.base)
+            scorer_base = resolve_scorer_base(self.scorer_path, self.base)
+            self._s, self._stok = load_trained_scorer(self.scorer_path, scorer_base)
         return self._s, self._stok
 
     # ---- capabilities ----

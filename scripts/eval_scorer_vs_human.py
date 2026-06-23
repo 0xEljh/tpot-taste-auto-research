@@ -21,7 +21,7 @@ _MAP = {"👍 tpot": 1.0, "🤔 borderline": 0.5, "👎 not tpot": 0.0}
 @app.command()
 def main(
     scorer: Path = Path("outputs/scorer/qwen3b-bt-taste-LOCKED"),
-    base: str = "Qwen/Qwen2.5-3B-Instruct",
+    base: str = typer.Option(None, help="base model id; default: read from the scorer's adapter_config"),
     calib: Path = Path("data/splits/calibration_set.parquet"),
     labels: Path = Path("outputs/calibration_labels.json"),
     heldout: Path = typer.Option(None, help="json list of ids to restrict to (e.g. few-shot held-out)"),
@@ -29,6 +29,7 @@ def main(
     import numpy as np
     import polars as pl
 
+    from tpot_taste.engine import resolve_scorer_base
     from tpot_taste.scoring.model import load_trained_scorer, score_texts
 
     lab = {int(k): _MAP[v] for k, v in json.loads(labels.read_text()).items() if v in _MAP}
@@ -36,6 +37,7 @@ def main(
     rows = [r for r in pl.read_parquet(calib).to_dicts() if r["id"] in lab and r["id"] in keep]
     human = np.array([lab[r["id"]] for r in rows])
 
+    base = base or resolve_scorer_base(scorer, "Qwen/Qwen2.5-3B-Instruct")
     sm, stok = load_trained_scorer(str(scorer), base)
     s = np.asarray(score_texts(sm, stok, [r["text"] for r in rows], batch_size=16))
 

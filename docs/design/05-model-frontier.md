@@ -315,6 +315,65 @@ returns `GatedRepoError 403` because the HF account hasn't accepted Google's gat
 runs in ~15 min. `Gemma3ForSequenceClassification` *does* exist in transformers 5.5, so it will load as a
 regressor (the multimodal checkpoint's vision tower is dropped). Pending user accept.
 
+## 10. Frontier CV de-noising + v8 SHIP — Qwen3-8B scorer LOCKED (2026-06-23)
+
+§9.2's single-split frozen-46 table (n=46, ±0.07) was de-noised with **stratified 5-fold CV over all 177
+labels** (out-of-fold preds aggregated into one metric; `cv_fold_indices`/`assemble_oof`, TDD'd). This
+**revises §9.2 again** — and settles v8.
+
+### 10.1 The de-noised matrix (5-fold CV, n=177, linear-decay LR)
+| base / variant | objective | CV pw | ρ | prec | note |
+|---|---|---|---|---|---|
+| Qwen2.5-3B-Instruct | regression | 0.66 | +0.23 | 0.48 | floor |
+| Qwen3-4B-Instruct-2507 | regression (linear) | 0.72 | +0.32 | 0.50 | = v7.2 pw |
+| Qwen3-4B-Instruct-2507 | regression (cosine) | 0.71 | +0.32 | 0.54 | schedule wash |
+| Qwen3-4B-Instruct-2507 | **Bradley-Terry** | 0.50 | +0.00 | — | collapsed |
+| gemma-3-4b-it | regression | 0.69 single / ~0.74 (3-fold) | — | — | not competitive |
+| Skywork-Reward-V2-Qwen3-4B @lr2e-5 | regression | 0.32 | −0.24 | 0.12 | warm-start dead |
+| **Qwen3-8B** | **regression (linear)** | **0.82** | **+0.46** | **0.75** | **WINNER** |
+| *(ref)* v7.2 3B+BT (was SHIPPED) | BT | 0.72 | +0.39 | 0.71 | incumbent |
+
+Per-fold mean (0.81) ≈ the OOF aggregate (0.82) → robust, not an aggregation artifact.
+
+### 10.2 What de-noising overturned / confirmed
+- **The 4B's 0.82 was a lucky split.** Its 5 folds ran 0.57→0.86; the single frozen-46 (§9.2) caught the top.
+  De-noised it is **0.72 = shipped v7.2** — the 4B does NOT clear the incumbent. §9.2/9.3's "Qwen3-4B-2507 is the
+  standout / first to clear v7.2" is **WITHDRAWN**.
+- **The base ladder is monotone**: 3B 0.66 → 4B 0.72 → 8B 0.82. So it *is* partly size (4B→8B = +0.10), contra
+  §9.2's "4B ≈ 8B" — that too was single-split (the in-process 8B folds 1–2 fluked 0.99/0.86; clean 5-fold = 0.82).
+- **Schedule is a wash**: linear 0.72 ≈ cosine 0.71 on this small fine-tune. Linear adopted as default (literature
+  + user) but it is not a lever here. [[finetuning-lr-schedule]]
+- **Regression ≫ BT on Qwen3**: BT/RewardTrainer on Qwen3-4B *collapsed* to chance (loss→0.12, held-out ρ 0.000,
+  constant output). v8 objective = pointwise regression.
+- **Warm-start RMs dead even with an LR rescue** (Skywork-V2-4B @lr2e-5 = 0.32, below chance).
+- **Gemma** (collator fixed — inject zero `token_type_ids` when `self.training`; eval exempt): single 0.69, CV
+  ~0.74 (3 folds) — between 4B and 8B, not competitive. Both Gemma + 8B arms had died on infra, both fixed:
+  heavy-base CV now runs one fresh process per fold (`--fold`/`--cv-aggregate`) so the OS reclaims GPU between folds.
+
+### 10.3 v8 DECISION — SHIP Qwen3-8B (regression, linear). LOCKED repointed. (D43)
+Qwen3-8B is the unambiguous de-noised winner. Shipping it (gated on the acceptance test) was user-approved — **it
+passed both gates**:
+- **Quantitative** (frozen-46, identical tool as v7.2): pw **0.83** / ρ **+0.425** / prec **1.00** vs v7.2
+  0.72 / +0.392 / 0.71. (CV-177: 0.82 / +0.46 / 0.75.)
+- **Qualitative — de-platitude panel** (`scripts/accept_scorer.py`, generalises demo_eval §1 to any base):
+  v8 = **CLEAN** (tpot_canon +0.82, aphorism +0.73 above every low category; platitudes +0.68); v7.2 = **BLURRED**
+  (ranks motivational platitudes −0.32 *above* the aphorisms −1.28 — the long-standing D27/D28 blur). **v8 fixes
+  the aphorism↔platitude failure**, not just the aggregate metric.
+
+**Architecture change (accepted tradeoff).** The scorer is no longer on the Writer's base. The "one shared base,
+two adapters" invariant relaxes to **"each adapter carries its own base"**: `resolve_scorer_base` reads the
+scorer's `adapter_config.json` `base_model_name_or_path` (engine + eval auto-resolve; no caller change, legacy
+3B adapters still work). Co-residency validated — 3B writer + 8B scorer best-of-N peaks **7.36 GB** (< 12 GB), so
+the recommend→draft→score loop stays swap-free.
+
+**LOCKED**: `outputs/scorer/qwen3b-bt-taste-LOCKED` → `v8-qwen3-8b` (symlink name kept as the pointer; v7.2 dir
+preserved for rollback). Trained on the 131-train split (frozen-46 held out) via `bakeoff_scorer.py --save-adapter`.
+
+**Open / next:** the **Writer is now the bottleneck** — best-of-N on the "discipline" trap still drifts
+motivational, and a better scorer can only rank what the 3B DPO-v2 writer generates. Writer-side base upgrade
+(§1) is the next frontier. Loose end: a 5-fold CV of 3B+**BT** would close the last apples-to-apples gap (we have
+3B *regression* CV = 0.66, but the incumbent is 3B *BT*, whose 0.72 is still a single split).
+
 ---
 
 ## References
