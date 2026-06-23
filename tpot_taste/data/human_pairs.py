@@ -40,6 +40,30 @@ def stratified_heldout(items, n_heldout: int, seed: int = 0):
     return held, train
 
 
+def resolve_split(items, n_heldout: int, seed: int = 0, existing_heldout=None):
+    """Decide the held-out / train split, FREEZING an existing held-out when one is given.
+
+    items: list of (id, label). Returns (heldout_ids:set, train_ids:set).
+
+    Active-learning correctness: once a held-out eval set exists it must not drift as new labels
+    arrive — otherwise each round's metric is measured on a different test set, and a change like
+    "pw 0.72 -> 0.78" conflates "more labels helped" with "the test set got easier". So if
+    existing_heldout is provided (and non-empty) it is kept verbatim — intersected with the
+    currently-labeled ids, in case a held-out item lost its label — and every other item, INCLUDING
+    newly added labels, goes to train. Only when no held-out exists yet do we stratify a fresh one.
+
+    Alternative considered: re-stratify (and grow) the held-out every round so the eval CI tightens
+    as labels accumulate. That trades cross-round comparability for statistical power; we choose
+    comparability here (the round-over-round delta is the headline), and can grow it deliberately later.
+    """
+    if existing_heldout:
+        ids = {i for i, _ in items}
+        held = set(existing_heldout) & ids
+        train = ids - held
+        return held, train
+    return stratified_heldout(items, n_heldout=n_heldout, seed=seed)
+
+
 def build_pairs(train_items, *, pair_types=("hi_lo", "hi_mid", "mid_lo"),
                 length_tol: int | None = None, reuse_cap: int | None = None, seed: int = 0):
     """train_items: list of dict(id, text, label in {0.0, 0.5, 1.0}). Return BT pair dicts.

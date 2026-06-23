@@ -249,6 +249,74 @@ more labels lift the 0.67 ceiling or finally separate the arms.
 
 ---
 
+## 9. Frontier extension + round-3 loop close (2026-06-23)
+
+### 9.1 Round-3 loop closed — labels lifted the *pointwise* ceiling, not the *pairwise* one
+
+Round-3 labels in (137 → 177: +9 tpot / +16 borderline / +15 not, ids 141–180). Held-out **FROZEN** at the
+original 46 ids (`resolve_split` guard + 5 tests in `tests/test_human_pairs.py`; md5-verified identical) so any
+movement is "more labels", not "an easier test set". The merge fix: round texts lived only in
+`round3_candidates.parquet`, folded into `calibration_set.parquet` via `merge_round_candidates.py`. Result is
+**objective-dependent**:
+- pointwise probe (frozen MiniLM/mpnet + Ridge): 5-fold CV pw 0.67 → **0.72** (+0.05) — labels helped.
+- pairwise BT (3B): v7.2 (91 train) pw 0.72 / ρ +0.39 → v7.3 (131 train) pw 0.69 / ρ +0.16 — did **not** help.
+
+The round-3 batch was uncertainty-selected (16/40 borderline) — coverage a regressor exploits, but noisy
+mid-class contrasts for the BT objective. **Kept LOCKED = v7.2** (v7.3 not shipped).
+
+**hi_lo-only BT diagnostic — hypothesis REFUTED.** I'd guessed the borderline round-3 pairs *poisoned* the BT
+scorer, so I trained BT on only the 1,760 clean tpot>not pairs (borderline dropped, pairs verified 1760/1760
+winner=tpot/loser=not, same 2-epoch recipe as v7.2 per `train_meta.json`). Result: pw **0.39** / ρ −0.077 —
+*below chance*. Dropping the borderline contrasts did NOT recover v7.2; it *destabilized* BT. So the borderline
+pairs are **load-bearing, not poison** — the tpot>borderline>not ordering constraints regularize the BT geometry,
+and stripping them lets the scorer collapse onto a confound. The v7.3 dip is pair-composition sensitivity, not
+removable noise. **Pairs-surgery is a dead end; the real lever is the base (§9.2).** (Lesson still holds: future
+label rounds should mix high-confidence tpot/not *anchors* with boundary cases, not flood the middle.)
+
+### 9.2 The frontier bake-off — REVISES "label-limited, not model-limited"
+
+The §7 bake-off tested only Qwen2.5-3B + small encoders → "the model isn't the bottleneck." Extending to the
+Qwen3 frontier (the user's 8B/Gemma ask) **overturns that for the base generation.** Same 4-bit QLoRA seq-cls
+**regression** recipe (all-linear LoRA, 15 epochs), same frozen 46 held-out, only the BASE varies:
+
+| base | gen | params | warm-start | held-out pw | ρ | prec |
+|---|---|---|---|---|---|---|
+| Qwen2.5-3B-Instruct | Qwen2.5 | 3B | — | 0.60 | +0.15 | 0.50 |
+| Skywork-Reward-V2-Qwen3-4B | Qwen3 | 4B | RM head | 0.50 (re-run 0.50, reproduces) | +0.04 | 0.29 |
+| **Qwen3-4B-Instruct-2507** | Qwen3 | 4B | — | **0.82** | **+0.48** | **0.88** |
+| Skywork-Reward-V2-Qwen3-8B | Qwen3 | 8B | RM head | 0.79 | +0.44 | 0.50 |
+| Qwen3-8B | Qwen3 | 8B | — | 0.83 | +0.51 | 0.71 |
+| *(ref)* v7.2 3B + Bradley-Terry (SHIPPED) | Qwen2.5 | 3B | — | 0.72 | +0.39 | — |
+
+**Findings:** (a) Qwen2.5→Qwen3 = **+0.22 pw (~3σ)** — the base prior matters; but **Qwen3-4B ≈ Qwen3-8B**
+(0.82 vs 0.83), so the lever is *generation*, not *size*. 8B + 4-bit fits 12GB (bs=2) but buys ~nothing over 4B.
+(b) **Warm-start Skywork RMs do NOT help** — a strong *general* reward prior is calibrated to a consensus taste
+and resists being bent to this idiosyncratic one in 131 examples; plain instruct base > warm-start RM here.
+(c) **Qwen3-4B-2507 is the standout** (precision 0.88, ρ second only to 8B, fits 12GB), beating v7.2 by +0.10 pw.
+
+**Revised verdict:** the scorer is *partly* model-limited after all — but the lever is the **base generation
+(Qwen2.5→Qwen3-4B)**, not size/objective/warm-start. Labels AND base both matter; the §7 "purely label-limited"
+conclusion was an artifact of testing only one (older) decoder generation.
+
+### 9.3 v8 scorer candidate (validate, don't blind-swap)
+
+Qwen3-4B-2507 + pointwise regression is the first arm to *clearly* clear v7.2. Before repointing LOCKED:
+1. **5-fold CV over all 177 labels** — n=46 makes 0.82-vs-0.72 only ~1.4σ; the ~3σ signal is the within-recipe
+   3B→Qwen3 gap, so confirm the *absolute* level holds under CV.
+2. **Re-confirm it ranks generated drafts** (de-platitudes the Writer's best-of-N) — the v7.2 acceptance test.
+3. Then train v8, acceptance-test, repoint LOCKED. The base upgrade (earlier "Writer-side, secondary") matters
+   **scorer-side** too — but only after labels raised the ceiling enough for it to show (it couldn't at 137).
+
+### 9.4 Gemma — blocked on license acceptance, not the token
+
+HF token is valid (it pulled the ungated Qwen/Skywork bases). Every Gemma repo (3-4b-it/-pt, 3-1b, 2-2b, 2-9b)
+returns `GatedRepoError 403` because the HF account hasn't accepted Google's gated license. One-click accept at
+`huggingface.co/google/gemma-3-4b-it` ("Agree and access repository", auto-approved) unblocks it; then the arm
+runs in ~15 min. `Gemma3ForSequenceClassification` *does* exist in transformers 5.5, so it will load as a
+regressor (the multimodal checkpoint's vision tower is dropped). Pending user accept.
+
+---
+
 ## References
 
 **Base models:** [Qwen3-4B-Instruct-2507](https://huggingface.co/Qwen/Qwen3-4B-Instruct-2507) ·

@@ -7,7 +7,7 @@ The human's labels are length-balanced (len↔label r=-0.036), so length-matchin
 """
 from __future__ import annotations
 
-from tpot_taste.data.human_pairs import build_pairs, stratified_heldout
+from tpot_taste.data.human_pairs import build_pairs, resolve_split, stratified_heldout
 
 
 def _items(n_hi, n_mid, n_lo):
@@ -68,3 +68,46 @@ def test_build_pairs_length_tol_respected():
 def test_build_pairs_only_hi_lo_when_restricted():
     pairs = build_pairs(_items(10, 8, 12), pair_types=("hi_lo",), seed=0)
     assert {(p["label_w"], p["label_l"]) for p in pairs} == {(1.0, 0.0)}
+
+
+# --- held-out FREEZE for the active-learning loop (round 3+): the eval set must not drift ---
+
+def _idlab(ids_labels):
+    return [(i, l) for i, l in ids_labels]
+
+
+def test_resolve_split_freezes_existing_heldout():
+    items = _idlab([(1, 1.0), (2, 0.0), (3, 1.0), (4, 0.0), (5, 0.5), (6, 0.5)])
+    held, train = resolve_split(items, n_heldout=2, existing_heldout={1, 2})
+    assert held == {1, 2}
+    assert train == {3, 4, 5, 6}
+
+
+def test_resolve_split_new_items_go_to_train_not_heldout():
+    # THE active-learning property: adding ids 7,8 leaves held-out unchanged; they land in train
+    items = _idlab([(1, 1.0), (2, 0.0), (3, 1.0), (4, 0.0), (7, 1.0), (8, 0.0)])
+    held, train = resolve_split(items, n_heldout=2, existing_heldout={1, 2})
+    assert held == {1, 2}
+    assert {7, 8} <= train
+
+
+def test_resolve_split_drops_heldout_ids_absent_from_items():
+    items = _idlab([(1, 1.0), (3, 0.0)])
+    held, train = resolve_split(items, n_heldout=2, existing_heldout={1, 99})
+    assert held == {1}            # 99 not currently labeled -> dropped
+    assert train == {3}
+
+
+def test_resolve_split_none_matches_stratified():
+    items = _idlab([(i, float(i % 3) / 2) for i in range(1, 31)])
+    a = resolve_split(items, n_heldout=9, seed=0, existing_heldout=None)
+    b = stratified_heldout(items, n_heldout=9, seed=0)
+    assert a == b
+
+
+def test_resolve_split_empty_existing_falls_back_to_stratified():
+    # an empty set is falsy -> stratify a fresh held-out (not "freeze nothing")
+    items = _idlab([(i, float(i % 3) / 2) for i in range(1, 31)])
+    a = resolve_split(items, n_heldout=9, seed=0, existing_heldout=set())
+    b = stratified_heldout(items, n_heldout=9, seed=0)
+    assert a == b

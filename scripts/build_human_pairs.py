@@ -29,20 +29,29 @@ def main(
     pair_types: str = "hi_lo,hi_mid,mid_lo",
     length_tol: int = 0,        # 0 => no length restriction (labels are already length-balanced)
     reuse_cap: int = 0,         # 0 => unbounded reuse (all-pairs)
+    reuse_heldout: bool = True,  # freeze an existing held-out (active-learning: eval set must not drift)
     seed: int = 0,
 ) -> None:
     import numpy as np
     import polars as pl
 
-    from tpot_taste.data.human_pairs import build_pairs, stratified_heldout
+    from tpot_taste.data.human_pairs import build_pairs, resolve_split
 
     lab = {int(k): _MAP[v] for k, v in json.loads(labels.read_text()).items() if v in _MAP}
     rows = [r for r in pl.read_parquet(calib).to_dicts() if r["id"] in lab]
     items = [(r["id"], lab[r["id"]]) for r in rows]
 
-    held, train = stratified_heldout(items, n_heldout=n_heldout, seed=seed)
+    existing = None
+    if reuse_heldout and out_heldout.exists():
+        existing = set(json.loads(out_heldout.read_text()))
+    held, train = resolve_split(items, n_heldout=n_heldout, seed=seed, existing_heldout=existing)
     out_heldout.parent.mkdir(parents=True, exist_ok=True)
-    out_heldout.write_text(json.dumps(sorted(held)))
+    if existing is None:
+        out_heldout.write_text(json.dumps(sorted(held)))
+        print(f"[split] stratified a FRESH held-out ({len(held)} ids) -> {out_heldout}")
+    else:
+        print(f"[split] REUSED frozen held-out ({len(held)} ids) <- {out_heldout} "
+              f"(all new labels routed to train; {len(train)} train)")
     hc = {c: sum(1 for i in held if lab[i] == c) for c in (1.0, 0.5, 0.0)}
     tc = {c: sum(1 for i in train if lab[i] == c) for c in (1.0, 0.5, 0.0)}
     print(f"[split] held-out {len(held)} (tpot {hc[1.0]} / bord {hc[0.5]} / not {hc[0.0]})  "

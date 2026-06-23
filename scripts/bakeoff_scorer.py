@@ -7,12 +7,18 @@ Arms:
   embed-mlp    frozen sentence-embedding + sklearn head (Ridge / MLP)   [seconds, no train()]
   regress-3b   Qwen2.5-3B + regression head (pointwise MSE, QLoRA)      [minutes, GPU]
   modernbert   ModernBERT-large fine-tuned regressor (LoRA)             [minutes, GPU]
+  seqcls       ANY HF base --base <id> as 4-bit seq-cls regressor (LoRA all-linear)   [minutes, GPU]
 Baseline (3B + Bradley-Terry, v7.2) is from scripts/eval_scorer_vs_human.py: held-out pw=0.72 / rho=0.39.
 
   uv run python scripts/bakeoff_scorer.py --arm embed-mlp
   uv run python scripts/bakeoff_scorer.py --arm regress-3b --smoke   # fast GPU sanity
   uv run python scripts/bakeoff_scorer.py --arm regress-3b
   uv run python scripts/bakeoff_scorer.py --arm modernbert
+  # the 4B/8B + Gemma + warm-start Skywork-Reward-V2 frontier (doc 05 §9):
+  uv run python scripts/bakeoff_scorer.py --arm seqcls --base Skywork/Skywork-Reward-V2-Qwen3-4B
+  uv run python scripts/bakeoff_scorer.py --arm seqcls --base Skywork/Skywork-Reward-V2-Qwen3-8B --bs 2
+  uv run python scripts/bakeoff_scorer.py --arm seqcls --base Qwen/Qwen3-8B --bs 2
+  uv run python scripts/bakeoff_scorer.py --arm seqcls --base google/gemma-3-4b-it
 """
 from __future__ import annotations
 
@@ -38,6 +44,7 @@ def main(
     out: Path = Path("outputs/scorer/bakeoff-tmp"),
     epochs: float = 15.0,
     lr: float = 1e-4,
+    bs: int = 4,
     seed: int = 0,
     smoke: bool = False,
 ) -> None:
@@ -60,6 +67,8 @@ def main(
         _regress_3b(train_pw, held_pw, base, out, epochs, lr, seed, smoke)
     elif arm == "modernbert":
         _modernbert(train_pw, held_pw, out, epochs, lr, seed, smoke)
+    elif arm == "seqcls":
+        _seqcls(train_pw, held_pw, base, out, epochs, lr, seed, smoke, bs)
     else:
         raise SystemExit(f"unknown arm '{arm}'")
 
@@ -95,7 +104,7 @@ def _embed_mlp(train_pw, held_pw, all_pw, embedder: str, head: str, seed: int) -
         cv = human_eval(oof, yall)
         print(f"  [{name:5}] held-out: pw={he['pairwise']:.2f} rho={he['spearman']:+.2f} "
               f"prec={he['precision']:.2f} (n={he['n']}, {he['n_tpot']}tpot/{he['n_not']}not)"
-              f"   | 5-fold CV(137): pw={cv['pairwise']:.2f} rho={cv['spearman']:+.2f}")
+              f"   | 5-fold CV({len(yall)}): pw={cv['pairwise']:.2f} rho={cv['spearman']:+.2f}")
 
 
 def _train_seqcls_regression(model, tok, train_pw, *, epochs, lr, batch_size, out,
@@ -149,6 +158,28 @@ def _regress_3b(train_pw, held_pw, base, out, epochs, lr, seed, smoke) -> None:
     _train_seqcls_regression(model, tok, train_pw, epochs=epochs, lr=lr, batch_size=8,
                              out=out, smoke=smoke, grad_ckpt=True)
     _eval_seqcls(model, tok, held_pw, "regress-3b" + ("/smoke" if smoke else ""))
+
+
+def _seqcls(train_pw, held_pw, base, out, epochs, lr, seed, smoke, batch_size=4) -> None:
+    """Generic frontier arm: load ANY HF model as a 4-bit AutoModelForSequenceClassification(num_labels=1)
+    and LoRA-fine-tune it as a pointwise taste regressor. Covers the 4B/8B + Gemma bases AND the warm-start
+    Skywork-Reward-V2 RMs — those already ship a trained num_labels=1 head, so load_reward_model loads a
+    *calibrated* reward head here rather than a random one (warm-start). Same all-linear LoRA recipe as
+    --arm modernbert, so across the bake-off only the BASE varies (apples-to-apples; regression objective,
+    which the research found >= Bradley-Terry at <=8B). --bs 2 for the 8B bases to stay inside 12GB."""
+    from peft import LoraConfig, TaskType, get_peft_model, prepare_model_for_kbit_training
+
+    from tpot_taste.scoring.model import load_reward_model
+
+    model, tok = load_reward_model(base, four_bit=True)
+    model = prepare_model_for_kbit_training(model, use_gradient_checkpointing=True)
+    model = get_peft_model(model, LoraConfig(
+        r=16, lora_alpha=32, lora_dropout=0.05, bias="none",
+        task_type=TaskType.SEQ_CLS, target_modules="all-linear"))
+    model.config.pad_token_id = tok.pad_token_id
+    _train_seqcls_regression(model, tok, train_pw, epochs=epochs, lr=lr, batch_size=batch_size,
+                             out=out, smoke=smoke, grad_ckpt=True)
+    _eval_seqcls(model, tok, held_pw, f"seqcls:{base.split('/')[-1]}" + ("/smoke" if smoke else ""))
 
 
 def _modernbert(train_pw, held_pw, out, epochs, lr, seed, smoke,
