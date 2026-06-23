@@ -27,6 +27,7 @@ def main(
     lora_r: int = 16,
     lora_alpha: int = 32,
     run_name: str = "scorer-bt-v1",
+    scheduler: str = "linear",
     smoke: bool = False,
 ) -> None:
     from datasets import Dataset
@@ -60,7 +61,7 @@ def main(
         gradient_checkpointing=True,
         gradient_checkpointing_kwargs={"use_reentrant": False},
         warmup_ratio=0.03,
-        lr_scheduler_type="cosine",
+        lr_scheduler_type=scheduler,
         optim="paged_adamw_8bit",
         max_grad_norm=1.0,
         center_rewards_coefficient=0.01,

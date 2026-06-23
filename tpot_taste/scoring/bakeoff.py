@@ -60,3 +60,20 @@ def human_eval(scores, human) -> dict:
         prec = float("nan")
     return {"pairwise": pw, "spearman": rho, "precision": prec,
             "n": int(len(s)), "n_tpot": int((h == 1.0).sum()), "n_not": int((h == 0.0).sum())}
+
+
+def cv_fold_indices(targets, n_splits: int = 5, seed: int = 0):
+    """Stratified k-fold over pointwise taste targets (3 classes 0/0.5/1).
+
+    Returns [(train_idx, test_idx), ...] as int arrays. Every index lands in exactly one
+    TEST fold, so concatenating the per-fold held-out predictions gives one out-of-fold
+    prediction per sample — the de-noised CV signal the frontier bake-off needs (n=46 on a
+    single fixed split is ±0.07; CV over all 177 is the robust read). Stratifying by the
+    three label classes keeps every fold from dropping tpot/borderline/not.
+    """
+    from sklearn.model_selection import StratifiedKFold
+
+    y = np.asarray(targets, dtype=float)
+    strat = np.rint(y * 2).astype(int)  # {0.0,0.5,1.0} -> {0,1,2}
+    skf = StratifiedKFold(n_splits=n_splits, shuffle=True, random_state=seed)
+    return [(tr, te) for tr, te in skf.split(np.zeros(len(y)), strat)]

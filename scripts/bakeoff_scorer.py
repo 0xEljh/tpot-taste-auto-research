@@ -47,6 +47,9 @@ def main(
     bs: int = 4,
     seed: int = 0,
     smoke: bool = False,
+    cv: bool = False,
+    folds: int = 5,
+    scheduler: str = "linear",
 ) -> None:
     import polars as pl
 
@@ -68,7 +71,10 @@ def main(
     elif arm == "modernbert":
         _modernbert(train_pw, held_pw, out, epochs, lr, seed, smoke)
     elif arm == "seqcls":
-        _seqcls(train_pw, held_pw, base, out, epochs, lr, seed, smoke, bs)
+        if cv:
+            _seqcls_cv(all_pw, base, out, epochs, lr, seed, smoke, bs, folds, scheduler)
+        else:
+            _seqcls(train_pw, held_pw, base, out, epochs, lr, seed, smoke, bs, scheduler)
     else:
         raise SystemExit(f"unknown arm '{arm}'")
 
@@ -108,7 +114,7 @@ def _embed_mlp(train_pw, held_pw, all_pw, embedder: str, head: str, seed: int) -
 
 
 def _train_seqcls_regression(model, tok, train_pw, *, epochs, lr, batch_size, out,
-                             smoke, grad_ckpt=True, max_length=256):
+                             smoke, grad_ckpt=True, max_length=256, scheduler="linear"):
     """Fine-tune any AutoModelForSequenceClassification(num_labels=1) as an MSE regressor on
     pointwise (text, target in {0,0.5,1}) rows. num_labels=1 + float labels => HF uses MSELoss."""
     from datasets import Dataset
@@ -123,7 +129,7 @@ def _train_seqcls_regression(model, tok, train_pw, *, epochs, lr, batch_size, ou
         num_train_epochs=(1 if smoke else epochs), max_steps=(4 if smoke else -1),
         learning_rate=lr, bf16=True, gradient_checkpointing=grad_ckpt,
         gradient_checkpointing_kwargs={"use_reentrant": False} if grad_ckpt else None,
-        optim="paged_adamw_8bit", warmup_ratio=0.03, lr_scheduler_type="cosine", max_grad_norm=1.0,
+        optim="paged_adamw_8bit", warmup_ratio=0.03, lr_scheduler_type=scheduler, max_grad_norm=1.0,
         logging_steps=5, save_strategy="no", report_to=[], dataloader_num_workers=2,
     )
     Trainer(model=model, args=args, train_dataset=ds,
@@ -160,7 +166,7 @@ def _regress_3b(train_pw, held_pw, base, out, epochs, lr, seed, smoke) -> None:
     _eval_seqcls(model, tok, held_pw, "regress-3b" + ("/smoke" if smoke else ""))
 
 
-def _seqcls(train_pw, held_pw, base, out, epochs, lr, seed, smoke, batch_size=4) -> None:
+def _seqcls(train_pw, held_pw, base, out, epochs, lr, seed, smoke, batch_size=4, scheduler="linear") -> None:
     """Generic frontier arm: load ANY HF model as a 4-bit AutoModelForSequenceClassification(num_labels=1)
     and LoRA-fine-tune it as a pointwise taste regressor. Covers the 4B/8B + Gemma bases AND the warm-start
     Skywork-Reward-V2 RMs — those already ship a trained num_labels=1 head, so load_reward_model loads a
@@ -178,8 +184,50 @@ def _seqcls(train_pw, held_pw, base, out, epochs, lr, seed, smoke, batch_size=4)
         task_type=TaskType.SEQ_CLS, target_modules="all-linear"))
     model.config.pad_token_id = tok.pad_token_id
     _train_seqcls_regression(model, tok, train_pw, epochs=epochs, lr=lr, batch_size=batch_size,
-                             out=out, smoke=smoke, grad_ckpt=True)
+                             out=out, smoke=smoke, grad_ckpt=True, scheduler=scheduler)
     _eval_seqcls(model, tok, held_pw, f"seqcls:{base.split('/')[-1]}" + ("/smoke" if smoke else ""))
+
+
+def _seqcls_cv(all_pw, base, out, epochs, lr, seed, smoke, batch_size, folds, scheduler="linear") -> None:
+    """De-noise the single-split frontier numbers: stratified k-fold CV of the seqcls
+    regressor over ALL labeled items. A fresh 4-bit LoRA model is trained per fold on the
+    K-1 training folds and scores the held fold; out-of-fold predictions are aggregated into
+    ONE human_eval over all N (n=46 single-split is ±0.07; CV over 177 is the robust read).
+    Frees the model between folds to stay inside 12 GB across the 5 reloads."""
+    import gc
+
+    import numpy as np
+    import torch
+    from peft import LoraConfig, TaskType, get_peft_model, prepare_model_for_kbit_training
+
+    from tpot_taste.scoring.bakeoff import cv_fold_indices, human_eval
+    from tpot_taste.scoring.model import load_reward_model, score_texts
+
+    texts = [t for _, t, _ in all_pw]
+    y = np.array([v for *_, v in all_pw], dtype=float)
+    oof = np.full(len(y), np.nan)
+    splits = cv_fold_indices(y, n_splits=folds, seed=seed)
+    for k, (tr, te) in enumerate(splits):
+        model, tok = load_reward_model(base, four_bit=True)
+        model = prepare_model_for_kbit_training(model, use_gradient_checkpointing=True)
+        model = get_peft_model(model, LoraConfig(
+            r=16, lora_alpha=32, lora_dropout=0.05, bias="none",
+            task_type=TaskType.SEQ_CLS, target_modules="all-linear"))
+        model.config.pad_token_id = tok.pad_token_id
+        _train_seqcls_regression(model, tok, [all_pw[i] for i in tr], epochs=epochs, lr=lr,
+                                 batch_size=batch_size, out=f"{out}/fold{k}", smoke=smoke,
+                                 grad_ckpt=True, scheduler=scheduler)
+        s = score_texts(model, tok, [texts[i] for i in te], batch_size=16)
+        oof[te] = s
+        fe = human_eval(s, y[te])
+        print(f"  [cv fold {k + 1}/{len(splits)}] n={len(te)} pw={fe['pairwise']:.2f} rho={fe['spearman']:+.2f}")
+        del model
+        gc.collect()
+        torch.cuda.empty_cache()
+    cv = human_eval(oof, y)
+    print(f"  [seqcls-cv:{base.split('/')[-1]}] {len(splits)}-fold CV(n={len(y)}): "
+          f"pw={cv['pairwise']:.2f} rho={cv['spearman']:+.2f} prec={cv['precision']:.2f} "
+          f"({cv['n_tpot']}tpot/{cv['n_not']}not)")
 
 
 def _modernbert(train_pw, held_pw, out, epochs, lr, seed, smoke,
