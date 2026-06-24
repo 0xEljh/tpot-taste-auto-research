@@ -28,6 +28,7 @@ def main(
     batch_size: int = 4,
     grad_accum: int = 8,
     lr: float = 5e-6,
+    scheduler: str = "linear",  # linear decay to 0 (recent-literature default); cosine = explicit ablation
     max_length: int = 512,
     max_prompt_length: int = 256,
     run_name: str = "writer-dpo-v1",
@@ -70,7 +71,7 @@ def main(
         per_device_train_batch_size=batch_size,
         gradient_accumulation_steps=grad_accum,
         learning_rate=lr,
-        lr_scheduler_type="cosine",
+        lr_scheduler_type=scheduler,
         warmup_ratio=0.05,
         max_length=max_length,
         max_prompt_length=max_prompt_length,

@@ -14,6 +14,8 @@ from collections.abc import Iterable
 
 import polars as pl
 
+from tpot_taste.writer.grpo_reward import is_baity
+
 SYS_PROMPT = (
     "You write posts for tpot — the introspective, intellectually playful corner of tech Twitter. "
     "Voice: specific, earnest or wry, a little surprising. Never engagement-bait, corporate, or platitudes."
@@ -56,23 +58,25 @@ def make_sft_records(
     """Build a mixed ideate+improve SFT set.
 
     Caps at available data (no duplication). `forbidden` excludes any example whose completion
-    (the real tweet) is in it — the leakage guard against held-out/eval text.
+    (the real tweet) is in it — the leakage guard against held-out/eval text. Engagement-bait is
+    dropped from both the ideate goods and the improve targets (is_baity) — the writer voice-clones
+    its targets, so a "$5,000 giveaway, RT to win" target teaches bait.
     """
     rng = random.Random(seed)
     forbidden = forbidden or set()
     records: list[dict] = []
 
-    # ideate: unique goods (dedup, preserve order), drop forbidden, shuffle, cap
-    goods_u = [g for g in dict.fromkeys(goods) if g not in forbidden]
+    # ideate: unique goods (dedup, preserve order), drop forbidden + bait, shuffle, cap
+    goods_u = [g for g in dict.fromkeys(goods) if g not in forbidden and not is_baity(g)]
     rng.shuffle(goods_u)
     for g in goods_u[:n_ideate]:
         records.append(_record("ideate", rng.choice(IDEATE_PROMPTS), g))
 
-    # improve: deopt pairs, rejected (weak) -> chosen (good); drop forbidden chosen
+    # improve: deopt pairs, rejected (weak) -> chosen (good); drop forbidden + baity targets
     rows = [
         (w, l)
         for w, l in zip(pairs["text_clean_w"].to_list(), pairs["text_clean_l"].to_list())
-        if w not in forbidden
+        if w not in forbidden and not is_baity(w)
     ]
     rng.shuffle(rows)
     for w, l in rows[:n_improve]:

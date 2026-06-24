@@ -5,7 +5,7 @@ import json
 
 import pytest
 
-from tpot_taste.engine import build_prompt, rank_topk, resolve_scorer_base
+from tpot_taste.engine import build_prompt, rank_topk, resolve_adapter_base, resolve_scorer_base
 
 
 def test_build_prompt_ideate_default():
@@ -51,6 +51,16 @@ def test_resolve_scorer_base_reads_adapter_config(tmp_path):
     # even when the Writer (and the engine default) is the 3B. This is the shared-base decouple.
     (tmp_path / "adapter_config.json").write_text(json.dumps({"base_model_name_or_path": "Qwen/Qwen3-8B"}))
     assert resolve_scorer_base(tmp_path, "Qwen/Qwen2.5-3B-Instruct") == "Qwen/Qwen3-8B"
+
+
+def test_resolve_adapter_base_is_generic_for_writer_and_scorer(tmp_path):
+    # D43 generalized: the Writer also loads on its OWN base (e.g. a 4B writer), read from its
+    # adapter_config — resolve_scorer_base is just an alias of the generic resolver.
+    assert resolve_scorer_base is resolve_adapter_base
+    (tmp_path / "adapter_config.json").write_text(
+        json.dumps({"base_model_name_or_path": "Qwen/Qwen3-4B-Instruct-2507"})
+    )
+    assert resolve_adapter_base(tmp_path, "Qwen/Qwen2.5-3B-Instruct") == "Qwen/Qwen3-4B-Instruct-2507"
 
 
 def test_resolve_scorer_base_falls_back_when_no_config(tmp_path):

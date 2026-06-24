@@ -99,17 +99,22 @@ def main(
     print(f"[gen] B={label_b}"); out_b = generate("B")
     del m; gc.collect(); torch.cuda.empty_cache()
 
+    from tpot_taste.engine import resolve_adapter_base
     from tpot_taste.scoring.model import load_trained_scorer, score_texts
+    from tpot_taste.writer.grpo_reward import is_baity
 
-    sm, stok = load_trained_scorer(str(scorer), base)
+    scorer_base = resolve_adapter_base(scorer, base)  # scorer carries its own base (v8 = Qwen3-8B)
+    sm, stok = load_trained_scorer(str(scorer), scorer_base)
     sa = np.array(score_texts(sm, stok, out_a, batch_size=32))
     sb = np.array(score_texts(sm, stok, out_b, batch_size=32))
     la = np.array([len(x) for x in out_a]); lb = np.array([len(x) for x in out_b])
+    ba = np.array([is_baity(x) for x in out_a]); bb = np.array([is_baity(x) for x in out_b])
     kinds = np.array([t for t, _ in tasks])
 
     res = {"A": label_a, "B": label_b, "n": len(tasks),
            "A_mean": float(sa.mean()), "B_mean": float(sb.mean()), "A_beats_B": float((sa > sb).mean()),
-           "A_len_mean": float(la.mean()), "B_len_mean": float(lb.mean())}
+           "A_len_mean": float(la.mean()), "B_len_mean": float(lb.mean()),
+           "A_bait_rate": float(ba.mean()), "B_bait_rate": float(bb.mean())}
     for k in ["ideate", "improve"]:
         mk = kinds == k
         res[f"{k}_A_beats_B"] = float((sa[mk] > sb[mk]).mean())
@@ -121,6 +126,8 @@ def main(
         print(f"  {k:8s}: A {res[f'{k}_A_mean']:+.2f}  B {res[f'{k}_B_mean']:+.2f}  A-beats-B {res[f'{k}_A_beats_B']:.2f}")
     print(f"  LENGTH audit (chars): A {res['A_len_mean']:.0f}  B {res['B_len_mean']:.0f}  "
           f"(big A>B = possible length reward-hacking)")
+    print(f"  BAIT audit (is_baity rate): A {res['A_bait_rate']:.2f}  B {res['B_bait_rate']:.2f}  "
+          f"(A>>B = bait reward-hacking; v8 over-rates 👇 bait)")
 
     order = np.argsort(-(sa - sb))
     print("\n== A's biggest wins ==")

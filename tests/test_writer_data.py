@@ -102,3 +102,29 @@ def test_deterministic_under_seed():
     a = sft_data.make_sft_records(GOODS, PAIRS, seed=7, n_ideate=4, n_improve=2)
     b = sft_data.make_sft_records(GOODS, PAIRS, seed=7, n_ideate=4, n_improve=2)
     assert a == b
+
+
+# ---- Phase 7: drop engagement-bait from the SFT corpus the writer voice-clones ----
+
+def test_ideate_drops_baity_goods():
+    # the writer voice-clones its targets, so a bait good must never become an ideate completion
+    goods = GOODS + ["drop a 🔥 in the replies if you agree, tag a friend who needs this 👇👇👇"]
+    recs = sft_data.make_sft_records(goods, PAIRS, seed=0, n_ideate=99, n_improve=0)
+    completions = [r["messages"][-1]["content"] for r in recs]
+    assert goods[-1] not in completions
+    assert len(recs) == len(GOODS)  # only the clean goods survive
+
+
+def test_improve_drops_baity_targets():
+    pairs = pl.DataFrame({
+        "text_clean_w": [
+            "the best abstractions feel inevitable once you see them",       # clean target -> kept
+            "I'm giving away $5,000 to 3 people who retweet this! ❤️🔥👇",     # baity target -> dropped
+        ],
+        "text_clean_l": ["abstractions are useful tools generally", "money giveaway, generic version"],
+        "style": ["bland", "bland"],
+    })
+    recs = sft_data.make_sft_records(GOODS, pairs, seed=0, n_ideate=0, n_improve=2)
+    targets = [r["messages"][-1]["content"] for r in recs]
+    assert pairs["text_clean_w"][1] not in targets
+    assert len(recs) == 1

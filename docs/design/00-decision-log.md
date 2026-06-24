@@ -7,6 +7,15 @@ Companion to `01-system-design.md` (the full design).
 
 ## STATUS (living)
 
+**Current (2026-06-24) — Phase 7 DONE.** Both models upgraded past the shared 3B. **Scorer LOCKED = v8**
+(`qwen3b-bt-taste-LOCKED` → `v8-qwen3-8b`; Qwen3-8B regression, D42/D43, doc `05-model-frontier §10`): de-noised
+5-fold CV crowned it (0.82/ρ+0.46) and it passed the de-platitude gate CLEAN. **Writer LOCKED = `qwen3-4b-sft-v3`**
+(Qwen3-4B-Instruct-2507, SFT-only on a **v8-curated** corpus, D44, doc §11): base upgrade fixes the 3B coherence
+ceiling; re-anchoring the SFT corpus to v8 (human-aligned) is the lever — **DPO toward v8 didn't help** (weak/noisy
+pref signal; gamed v8's blindspots) so SFT-only shipped (D35 redux). Architecture invariant relaxed: **each adapter
+carries its own base** (`resolve_adapter_base`); 4B-writer + 8B-scorer co-reside at 7.99 GB. **Open:** the
+`"work hard"` *improve* trap still amplifies; a writer that can *subvert* a platitude on command is the next lever.
+
 **Phase:** 6f DONE — **the scorer is now aligned with the *human's* taste.** Scorer **LOCKED = v7.2-human**
 (direct human-pair BT, D40/D41): held-out pairwise **0.50→0.72** vs the user's 137 labels, where v7.1 (rubric-distilled)
 was at chance. Writer stays DPO-v2 (the scorer is the taste lever; best-of-N propagates it, D35). **The arc:**
@@ -143,6 +152,20 @@ accelerate==1.13.0, bitsandbytes==0.49.2, datasets==4.3.0, numpy==2.2.6`.
 **Why.** Exactly the versions in `negative-space-learning-v2/uv.lock`, already in the uv cache → fast,
 first-try-clean resolve. vLLM and sentence-transformers kept in separate extras so they can't perturb the
 proven set. Per the compat research: pick torch first, let it pin triton/xformers; never bump piecemeal.
+
+## 2026-06-24 — D44: Writer re-anchored — Qwen3-4B-2507 + v8-curated SFT (ship SFT, not DPO)
+
+Full detail in `05-model-frontier §11`. The scorer (v8) fixed best-of-N *ranking*; the diagnostic showed the
+remaining wall is *generation* — the 3B DPO-v2 (whose prefs were **v6-scored**, platitude-loving) garbles/platitudes
+on abstract topics. Fix: base → **Qwen3-4B-Instruct-2507** (coherence ceiling), SFT corpus re-curated on **v8**
+(bait-dropped, English-tightened, top-12k→11.7k). **Shipped `qwen3-4b-sft-v3`; `qwen3-4b-dpo-v3` kept as experiment** —
+DPO toward v8 had negative training margins (v8 sees the writer's samples as similar) and only beat SFT by gaming v8's
+blindspots (repetition, +2% bait) → **D35 redux: clean-corpus SFT + best-of-N is the product; DPO toward a good scorer
+with subtle margins mildly hurts.** Engine D43-generalised to the writer (`resolve_adapter_base`); 4B+8B co-reside at
+7.99 GB. LOCKED `qwen3b-writer-LOCKED` → `qwen3-4b-sft-v3` (`qwen3b-dpo-v2` kept for rollback). Open: the `"work hard"`
+*improve* trap still amplifies the platitude; v8's residual still over-scores vague-advice.
+
+*(D42/D43 — the v8 scorer bake-off + ship — are recorded in `05-model-frontier §10`, not back-filled here.)*
 
 ## 2026-06-22 — D41: Scorer LOCKED v7.1 → v7.2-human — direct human pairs win; hybrid breadth is anti-aligned
 

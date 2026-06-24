@@ -31,7 +31,7 @@ def main(
     seed: int = 0,
 ) -> None:
     pairs = pl.read_parquet(pairs_path)
-    # ideate goods: a separate curated set (v7.1-curated, Phase 6d) if given, else the pairs' chosen
+    # ideate goods: a v8-curated clean set (Phase 7, scripts/curate_goods.py) if given, else pairs' chosen.
     goods = (pl.read_parquet(goods_path)["text_clean"].to_list() if goods_path
              else pairs["text_clean_w"].unique().to_list())
 
@@ -41,6 +41,8 @@ def main(
         if p.exists():
             forbidden |= set(pl.read_parquet(p)["text_clean"].to_list())
 
+    # make_sft_records drops engagement-bait from BOTH ideate goods and improve targets (is_baity) — the
+    # improve pairs' `chosen` come from the raw engagement-selected pool (e.g. "$5,000 giveaway, RT to win").
     recs = sft_data.make_sft_records(
         goods, pairs, n_ideate=n_ideate, n_improve=n_improve, seed=seed, forbidden=forbidden
     )

@@ -1,9 +1,9 @@
 """TasteEngine — the integration of the two locked models (Phase 5).
 
-Writer (DPO v2, CausalLM) generates; Scorer (SequenceClassification) judges. ideate/improve
-do best-of-N: generate N candidates, rank by the Scorer, return the top. Each adapter loads lazily
-on its OWN 4-bit base (resolve_scorer_base reads the scorer's recorded base, which may differ from
-the Writer's — e.g. an 8B scorer + 3B writer), so `score` doesn't pay for the Writer, and vice versa.
+Writer (CausalLM) generates; Scorer (SequenceClassification) judges. ideate/improve do best-of-N:
+generate N candidates, rank by the Scorer, return the top. Each adapter loads lazily on its OWN
+4-bit base (resolve_adapter_base reads each adapter's recorded base — they need not match, e.g. an
+8B scorer + 4B writer), so `score` doesn't pay for the Writer, and vice versa.
 
 Pure helpers (build_prompt, rank_topk) are unit-tested; the model paths are smoke-tested via the CLI.
 """
@@ -25,21 +25,24 @@ def build_prompt(kind: str, *, topic: str | None = None, draft: str | None = Non
     raise ValueError(f"unknown kind: {kind}")
 
 
-def resolve_scorer_base(scorer_path: Path | str, fallback: str) -> str:
-    """The scorer's OWN base model id, read from its PEFT `adapter_config.json`.
+def resolve_adapter_base(adapter_path: Path | str, fallback: str) -> str:
+    """An adapter's OWN base model id, read from its PEFT `adapter_config.json`.
 
-    The Scorer and Writer no longer necessarily share a base (e.g. a Qwen3-8B scorer alongside a
-    Qwen2.5-3B writer — see decision-log D43/§10). PEFT records the adapter's base, so the engine
-    loads each adapter on the base it was trained on instead of assuming the Writer's. Falls back
-    to `fallback` for legacy adapters that don't record one."""
+    The Scorer and Writer no longer share a base (D43/§10: an 8B scorer alongside a 3B/4B writer).
+    PEFT records each adapter's base, so the engine loads every adapter on the base it was trained
+    on instead of assuming one. Falls back to `fallback` for legacy adapters that don't record one."""
     import json
 
-    cfg = Path(scorer_path) / "adapter_config.json"
+    cfg = Path(adapter_path) / "adapter_config.json"
     if cfg.exists():
         base = json.loads(cfg.read_text()).get("base_model_name_or_path")
         if base:
             return base
     return fallback
+
+
+# back-compat alias: the resolver is generic (used for both Writer and Scorer adapters)
+resolve_scorer_base = resolve_adapter_base
 
 
 def rank_topk(candidates: list[str], scores: list[float], k: int) -> list[tuple[str, float]]:
@@ -72,13 +75,14 @@ class TasteEngine:
             from peft import PeftModel
             from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
 
-            tok = AutoTokenizer.from_pretrained(self.base)
+            writer_base = resolve_adapter_base(self.writer_path, self.base)
+            tok = AutoTokenizer.from_pretrained(writer_base)
             tok.padding_side = "left"
             if tok.pad_token is None:
                 tok.pad_token = tok.eos_token
             bnb = BitsAndBytesConfig(load_in_4bit=True, bnb_4bit_quant_type="nf4",
                                      bnb_4bit_compute_dtype=torch.bfloat16, bnb_4bit_use_double_quant=True)
-            m = AutoModelForCausalLM.from_pretrained(self.base, quantization_config=bnb, dtype=torch.bfloat16)
+            m = AutoModelForCausalLM.from_pretrained(writer_base, quantization_config=bnb, dtype=torch.bfloat16)
             self._w = PeftModel.from_pretrained(m, self.writer_path).eval()
             self._wtok = tok
         return self._w, self._wtok

@@ -376,6 +376,55 @@ motivational, and a better scorer can only rank what the 3B DPO-v2 writer genera
 
 ---
 
+## 11. Writer re-anchor — Qwen3-4B-2507 + v8-curated SFT (Phase 7, D44, 2026-06-24)
+
+Picking up §1 (the queued Writer base upgrade) now that the scorer (§10) proved itself.
+
+### 11.1 Diagnostic — the wall is GENERATION, not ranking
+Ran the writer (3B DPO-v2) best-of-N through the **v8** scorer (`demo_eval`). v8 fixed the *ranking* layer (§10
+CLEAN), so the open question was the *generation* layer: `best-of-N = scorer.rank(writer.generate(N))`. Finding:
+on concrete topics the 3B writes real tpot, but on **abstract platitude-bait topics** (discipline, "work hard")
+its entire best-of-8 pool is 👇-bait / platitudes / **garble** (*"you don't work hard you have bad life choices to
+make. work harder."*) — v8 can't promote a deadpan take that was never generated. Two root causes: (a) the 3B
+**coherence ceiling**, and (b) **DPO-v2's preference pairs were v6-scored** (confirmed via the scorer-dir timeline —
+only `v6-combined` existed when DPO-v2 was built), i.e. the writer was DPO'd to *prefer* v6's motivational register.
+
+### 11.2 The re-anchor (full pipeline on a stronger base)
+- **Base → Qwen3-4B-Instruct-2507** (non-thinking; the §1 pick): fixes the coherence ceiling; QLoRA fits 12 GB. The
+  engine generalises D43 to the Writer too — `resolve_scorer_base` → **`resolve_adapter_base`** (alias kept), so each
+  adapter loads on its own recorded base. **4B-writer + 8B-scorer co-reside at 7.99 GB** (< 12 GB), swap-free.
+- **SFT corpus re-curated on v8** (`curate_goods.py` re-run on LOCKED=v8): broad pool (uploader all-z + liked),
+  English filter tightened (diacritic + **stopword proxy** — v8 over-scores OOD non-English), **`is_baity`-dropped**
+  (v8's 👇-bait blindspot), per-author cap, top-12k → **11.7k** clean goods. `qwen3-4b-sft-v3`, **linear LR**.
+- **DPO pairs rebuilt against v8** (`build_dpo_pairs`): best-of-N from the 4B SFT, **v8-scored**, bait **penalised to
+  the rejected side** (defends v8's bait blindspot), `min_margin` recalibrated **1.5 → 0.2** for the v8 *regression*
+  scale (BT spans ±5; v8 regression spans ~[-0.2, 1.3], so 1.5 rejected ~everything). `qwen3-4b-dpo-v3`.
+
+### 11.3 DECISION — SHIP the SFT, not the DPO (D44)
+**`qwen3-4b-sft-v3` shipped; `qwen3-4b-dpo-v3` kept as an experiment.** DPO toward v8 **failed to add value**:
+training rewards/accuracies < 0.5, **negative margins** — v8 sees the writer's 4 samples as similar (per-prompt
+spread p50 0.33), so the preference signal is weak/noisy. Same-base head-to-head (n=60, v8-scored): DPO-v3 wins a
+marginal **0.55** (+0.04 mean) **but by gaming v8's blindspots** — its biggest "wins" are degenerate **repetition**
+(*"…problem with being a woman, and you have a problem with being a woman, and…"*) and it carries **+2% bait** vs
+SFT-v3's **0%**; where SFT-v3 wins the text is genuinely better (*"the last few years of my life has been like an
+hour … and I'm 24"*). Qualitatively, on the canonical **discipline** trap SFT-v3 is *specific* (*"i have 3 rules of
+discipline: 1. it's not a character flaw to…"*) while DPO-v3 drifts *vaguer*. **D35 redux: SFT on a v8-curated
+corpus + best-of-N is the product; DPO toward a good scorer with subtle margins doesn't help and mildly hurts**
+(it chases the scorer's *per-candidate* residual; SFT learns from v8 *aggregated over a clean pool* = robust).
+
+**Net vs the old 3B DPO-v2:** decisive win — coherence (4B fluent vs 3B garble), the discipline trap (specific, no
+bait vs 👇-bait), and control-topic quality all improve. **Remaining:** the `"work hard and you will succeed"`
+*improve* trap still amplifies the platitude (neither 4B version subverts it); v8's residual still over-scores some
+vague-advice, which caps how far best-of-N can de-platitude abstract prompts. A writer that can *subvert* a platitude
+on command is the next lever (targeted improve-supervision, or a larger base).
+
+**LOCKED**: `outputs/writer/qwen3b-writer-LOCKED` → `qwen3-4b-sft-v3` (symlink kept as the pointer; `qwen3b-dpo-v2`
+preserved for rollback). Latent-bug class fixed along the way: `curate_goods` / `build_dpo_pairs` / `eval_writer`
+all loaded the v8 scorer on the *writer's* base — invisible while writer-base == scorer-base, now all resolve the
+scorer's own base.
+
+---
+
 ## References
 
 **Base models:** [Qwen3-4B-Instruct-2507](https://huggingface.co/Qwen/Qwen3-4B-Instruct-2507) ·

@@ -36,6 +36,7 @@ def main(
     n_cand: int = 4,
     min_margin: float = 1.5,
     length_penalty: float = 0.0,
+    bait_penalty: float = 2.0,
     max_new_tokens: int = 64,
     seed: int = 0,
 ) -> None:
@@ -48,6 +49,7 @@ def main(
     from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
 
     from tpot_taste.writer.dpo_data import form_dpo_pairs
+    from tpot_taste.writer.grpo_reward import is_baity
     from tpot_taste.writer.sft_data import IDEATE_PROMPTS, IMPROVE_PROMPTS, SYS_PROMPT
 
     rng = random.Random(seed)
@@ -91,9 +93,12 @@ def main(
             print(f"  ...{i + len(chunk)}/{len(flat)}")
     del m; gc.collect(); torch.cuda.empty_cache()
 
+    from tpot_taste.engine import resolve_adapter_base
     from tpot_taste.scoring.model import load_trained_scorer, score_texts
 
-    sm, stok = load_trained_scorer(str(scorer), base)
+    # the SCORER carries its own base (v8 = Qwen3-8B), which differs from the writer `base` (Qwen3-4B).
+    scorer_base = resolve_adapter_base(scorer, base)
+    sm, stok = load_trained_scorer(str(scorer), scorer_base)
     scores = score_texts(sm, stok, texts, batch_size=48)
 
     # save raw candidates so pairs can be re-formed with a different length_penalty without regenerating
@@ -102,11 +107,15 @@ def main(
                   "user": [u for _, _, u in flat], "text": texts, "score": scores,
                   "len": [len(t) for t in texts]}).write_parquet(raw_out)
 
-    # length_penalty neutralizes v6's mild length lean (D21) so best-of-N doesn't just pick the longest
+    # length_penalty neutralizes v6's mild length lean (D21); bait_penalty sinks engagement-bait to the
+    # REJECTED side — the v8 scorer over-rates 👇-style bait (it gave a generated bait post +0.71), so
+    # without this, bait would become the `chosen`. Penalizing it instead teaches the writer bait=bad.
+    n_baity = sum(is_baity(t) for t in texts)
     groups: dict[int, dict] = {}
     for (gi, task, user), text, sc in zip(flat, texts, scores):
-        adj = sc - length_penalty * len(text)
+        adj = sc - length_penalty * len(text) - (bait_penalty if is_baity(text) else 0.0)
         groups.setdefault(gi, {"user": user, "task": task, "candidates": []})["candidates"].append((text, adj))
+    print(f"[bait] {n_baity}/{len(texts)} candidates flagged baity (penalty {bait_penalty} -> sunk to rejected)")
 
     records = form_dpo_pairs(groups.values(), sys_prompt=SYS_PROMPT, min_margin=min_margin)
     ch_len = np.mean([len(r["chosen"][0]["content"]) for r in records]) if records else 0.0

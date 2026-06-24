@@ -25,6 +25,7 @@ def main(
     batch_size: int = 8,
     grad_accum: int = 4,
     lr: float = 2e-4,
+    scheduler: str = "linear",  # linear decay to 0 (recent-literature default); cosine = explicit ablation
     max_length: int = 512,
     run_name: str = "writer-sft-v1",
     smoke: bool = False,
@@ -64,7 +65,7 @@ def main(
         per_device_train_batch_size=batch_size,
         gradient_accumulation_steps=grad_accum,
         learning_rate=lr,
-        lr_scheduler_type="cosine",
+        lr_scheduler_type=scheduler,
         warmup_ratio=0.03,
         max_length=max_length,
         packing=False,
