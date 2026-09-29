@@ -25,9 +25,11 @@ def main(
     max_eval_tweets: int = 8000,
     batch_size: int = 48,
 ) -> None:
+    from tpot_taste.engine import resolve_adapter_base
     from tpot_taste.scoring import metrics
     from tpot_taste.scoring.model import load_trained_scorer, score_texts
 
+    base = resolve_adapter_base(adapter, base)
     model, tok = load_trained_scorer(str(adapter), base)
     results: dict[str, float] = {}
 

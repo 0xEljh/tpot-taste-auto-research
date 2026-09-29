@@ -57,6 +57,7 @@ def main(
 ) -> None:
     import numpy as np
 
+    from tpot_taste.engine import resolve_adapter_base
     from tpot_taste.scoring.judge import judge_score
     from tpot_taste.scoring.model import load_trained_scorer, score_texts
 
@@ -64,7 +65,8 @@ def main(
     print(f"[sample] {len(texts)} real goods")
 
     # v6 (fast, batched)
-    sm, stok = load_trained_scorer(str(scorer), base)
+    scorer_base = resolve_adapter_base(scorer, base)
+    sm, stok = load_trained_scorer(str(scorer), scorer_base)
     v6 = np.asarray(score_texts(sm, stok, texts, batch_size=16))
     del sm
     import gc

@@ -29,6 +29,14 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+service = [
+  "fastapi>=0.110.0",
+  "uvicorn[standard]>=0.30.0",
+  "httpx>=0.27.0",
+  "prometheus-client>=0.20.0",
+  "transformers==5.5.0",
+]
+
 # Heavy modeling stack. Versions pinned to the set proven working on THIS
 # machine (negative-space-learning-v2/uv.lock) so uv reuses cached wheels and
 # resolves first-try-clean. Do not bump piecemeal — torch pins triton/xformers.
@@ -62,4 +70,12 @@ requires = ["setuptools>=69", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools]
-packages = ["tpot_taste"]
+
+[tool.setuptools.packages.find]
+include = ["tpot_taste*"]
+
+[tool.pytest.ini_options]
+markers = [
+  "gpu: requires local CUDA hardware",
+  "integration: requires external services or host setup",
+]

@@ -79,7 +79,10 @@ def main(
     ridge = Ridge(alpha=10.0).fit(X_lab, lab_y)
     r_score = ridge.predict(X_pool)
 
-    sm, stok = load_trained_scorer(scorer, "Qwen/Qwen2.5-3B-Instruct")
+    from tpot_taste.engine import resolve_adapter_base
+
+    scorer_base = resolve_adapter_base(scorer, "Qwen/Qwen2.5-3B-Instruct")
+    sm, stok = load_trained_scorer(scorer, scorer_base)
     v_score = np.asarray(score_texts(sm, stok, pool, batch_size=16))
 
     def rank01(a):

@@ -88,6 +88,7 @@ def main(
     import numpy as np
     import polars as pl
 
+    from tpot_taste.engine import resolve_adapter_base
     from tpot_taste.scoring.model import load_trained_scorer, score_texts
     from tpot_taste.writer.grpo_reward import is_baity
 
@@ -99,6 +100,7 @@ def main(
     src = ["uploader"] * len(up) + ["liked"] * len(lk)
     print(f"[load] goods: uploader={len(up):,} liked={len(lk):,} total={len(texts):,}")
 
+    base = resolve_adapter_base(scorer, base)
     sm, stok = load_trained_scorer(str(scorer), base)
     print("[score] v6 scoring goods ...")
     scores = score_texts(sm, stok, texts, batch_size=16)

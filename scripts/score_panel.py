@@ -24,8 +24,10 @@ def main(
     import numpy as np
 
     from tpot_taste.eval.demo_panel import EXPECTED_HIGH, EXPECTED_LOW, PANEL
+    from tpot_taste.engine import resolve_adapter_base
     from tpot_taste.scoring.model import load_trained_scorer, score_texts
 
+    base = resolve_adapter_base(scorer, base)
     sm, stok = load_trained_scorer(str(scorer), base)
     print(f"[scorer] {scorer}")
     means = {}

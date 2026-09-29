@@ -53,6 +53,7 @@ def main(
     patch_trl_availability()
     from trl import GRPOConfig, GRPOTrainer
 
+    from tpot_taste.engine import resolve_adapter_base
     from tpot_taste.scoring.model import load_trained_scorer, score_texts
     from tpot_taste.writer.grpo_reward import reward_components
     from tpot_taste.writer.sft_data import IDEATE_PROMPTS, IMPROVE_PROMPTS, SYS_PROMPT
@@ -74,7 +75,8 @@ def main(
     if tok.pad_token is None:
         tok.pad_token = tok.eos_token
 
-    sm, stok = load_trained_scorer(str(scorer), base)  # v6 reward model, loaded once
+    scorer_base = resolve_adapter_base(scorer, base)
+    sm, stok = load_trained_scorer(str(scorer), scorer_base)  # reward model, loaded once
 
     def taste_reward(completions, **kwargs):
         texts = [c[-1]["content"] if isinstance(c, list) else str(c) for c in completions]

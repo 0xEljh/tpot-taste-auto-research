@@ -11,51 +11,12 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from tpot_taste.writer.sft_data import IDEATE_PROMPTS, IMPROVE_PROMPTS, SYS_PROMPT
-
-
-def build_prompt(kind: str, *, topic: str | None = None, draft: str | None = None) -> str:
-    """The user-turn text for a given task. ideate optionally conditions on a topic; improve on a draft."""
-    if kind == "ideate":
-        return f"Write a tpot post about {topic.strip()}." if topic else IDEATE_PROMPTS[0]
-    if kind == "improve":
-        if not draft:
-            raise ValueError("improve needs a draft")
-        return IMPROVE_PROMPTS[0].format(draft=draft.strip())
-    raise ValueError(f"unknown kind: {kind}")
-
-
-def resolve_adapter_base(adapter_path: Path | str, fallback: str) -> str:
-    """An adapter's OWN base model id, read from its PEFT `adapter_config.json`.
-
-    The Scorer and Writer no longer share a base (D43/§10: an 8B scorer alongside a 3B/4B writer).
-    PEFT records each adapter's base, so the engine loads every adapter on the base it was trained
-    on instead of assuming one. Falls back to `fallback` for legacy adapters that don't record one."""
-    import json
-
-    cfg = Path(adapter_path) / "adapter_config.json"
-    if cfg.exists():
-        base = json.loads(cfg.read_text()).get("base_model_name_or_path")
-        if base:
-            return base
-    return fallback
+from tpot_taste.adapters import resolve_adapter_base
+from tpot_taste.inference import DEFAULT_GENERATION, build_prompt, normalize_generated_text, rank_topk, render_chat_prompt
 
 
 # back-compat alias: the resolver is generic (used for both Writer and Scorer adapters)
 resolve_scorer_base = resolve_adapter_base
-
-
-def rank_topk(candidates: list[str], scores: list[float], k: int) -> list[tuple[str, float]]:
-    """Top-k (text, score) by score desc, dropping blanks and exact-duplicate texts."""
-    seen: set[str] = set()
-    ranked: list[tuple[str, float]] = []
-    for t, s in sorted(zip(candidates, scores), key=lambda x: -x[1]):
-        key = " ".join(t.split()).lower()
-        if not key or key in seen:
-            continue
-        seen.add(key)
-        ranked.append((t, float(s)))
-    return ranked[:k]
 
 
 class TasteEngine:
@@ -100,33 +61,27 @@ class TasteEngine:
         m, tok = self._ensure_scorer()
         return score_texts(m, tok, texts, batch_size=32)
 
-    def _generate(self, user: str, n: int, temperature: float, max_new_tokens: int) -> list[str]:
-        import re
-
+    def _generate(self, user: str, n: int, temperature: float, max_new_tokens: int, top_p: float = DEFAULT_GENERATION.top_p) -> list[str]:
         import torch
         m, tok = self._ensure_writer()
-        rendered = tok.apply_chat_template(
-            [{"role": "system", "content": SYS_PROMPT}, {"role": "user", "content": user}],
-            tokenize=False, add_generation_prompt=True,
-        )
+        rendered = render_chat_prompt(tok, user)
         enc = tok([rendered] * n, return_tensors="pt", padding=True, truncation=True, max_length=320).to(m.device)
         with torch.no_grad():
             g = m.generate(**enc, max_new_tokens=max_new_tokens, do_sample=True, temperature=temperature,
-                           top_p=0.95, pad_token_id=tok.pad_token_id)
-        pre = re.compile(r"^(sure|here(\'s| is)|okay|ok|certainly)[,:]?\s*", re.I)
-        outs = []
+                           top_p=top_p, pad_token_id=tok.pad_token_id)
+        outs: list[str] = []
         for j in range(n):
-            t = tok.decode(g[j][enc["input_ids"].shape[1]:], skip_special_tokens=True).strip().strip('"').strip()
-            outs.append(" ".join(pre.sub("", t).split()))
+            text = tok.decode(g[j][enc["input_ids"].shape[1]:], skip_special_tokens=True)
+            outs.append(normalize_generated_text(text))
         return outs
 
     def ideate(self, topic: str | None = None, *, k: int = 3, best_of: int = 8,
-               temperature: float = 0.9, max_new_tokens: int = 64) -> list[tuple[str, float]]:
-        cands = self._generate(build_prompt("ideate", topic=topic), best_of, temperature, max_new_tokens)
-        return rank_topk(cands, self.score(cands), k)
+               temperature: float = 0.9, top_p: float = 0.95, max_new_tokens: int = 64) -> list[tuple[str, float]]:
+        cands = self._generate(build_prompt("ideate", topic=topic), best_of, temperature, max_new_tokens, top_p)
+        return rank_topk(cands, list(self.score(cands)), k)
 
     def improve(self, draft: str, *, k: int = 3, best_of: int = 8,
-                temperature: float = 0.9, max_new_tokens: int = 64) -> list[tuple[str, float]]:
-        cands = self._generate(build_prompt("improve", draft=draft), best_of, temperature, max_new_tokens)
-        ranked = rank_topk(cands, self.score(cands), k)
+                temperature: float = 0.9, top_p: float = 0.95, max_new_tokens: int = 64) -> list[tuple[str, float]]:
+        cands = self._generate(build_prompt("improve", draft=draft), best_of, temperature, max_new_tokens, top_p)
+        ranked = rank_topk(cands, list(self.score(cands)), k)
         return ranked

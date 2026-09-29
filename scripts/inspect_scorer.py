@@ -44,8 +44,10 @@ def main(
     sample: int = 4000,
     seed: int = 0,
 ) -> None:
+    from tpot_taste.engine import resolve_adapter_base
     from tpot_taste.scoring.model import load_trained_scorer, score_texts
 
+    base = resolve_adapter_base(adapter, base)
     model, tok = load_trained_scorer(str(adapter), base)
 
     print("== direction check (hand-written probes, sorted by score) ==")
